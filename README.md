@@ -1,6 +1,6 @@
-[![Build Status](https://aelassas.visualstudio.com/wexflow/_apis/build/status/aelassas.wexflow?branchName=main)](https://aelassas.visualstudio.com/wexflow/_build/latest?definitionId=3&branchName=main) [![NuGet](https://img.shields.io/nuget/v/Wexflow.svg)](https://www.nuget.org/packages/Wexflow/) [![Nuget](https://img.shields.io/nuget/dt/wexflow)](https://www.nuget.org/packages/Wexflow/)
+[![Build Status](https://aelassas.visualstudio.com/wexflow/_apis/build/status/aelassas.wexflow?branchName=main)](https://aelassas.visualstudio.com/wexflow/_build/latest?definitionId=3&branchName=main) [![Nuget](https://img.shields.io/nuget/dt/wexflow)](https://www.nuget.org/packages/Wexflow/) [![Latest release](https://img.shields.io/github/v/release/aelassas/wexflow?label=Release&logo=github)](https://github.com/aelassas/wexflow/releases/latest) [![NuGet](https://img.shields.io/nuget/v/Wexflow.svg)](https://www.nuget.org/packages/Wexflow/) [![](https://img.shields.io/badge/docs-wiki-brightgreen)](https://github.com/aelassas/wexflow/wiki)
 
-Wexflow is an open source and cross-platform workflow engine and automation platform that aims to automate recurring tasks. With the help of Wexflow, building automation and workflow processes become easy.
+Wexflow is an open-source and cross-platform workflow engine and automation platform that aims to automate recurring tasks. With the help of Wexflow, building automation and workflow processes become easy.
 
 Wexflow provides a cross-platform workflow server, a backend for designing, managing, and tracking workflows, sequential workflows, flowchart workflows, and approval workflows on generic business objects called records.
 
@@ -22,8 +22,9 @@ Wexflow provides 100+ activities for different kind of tasks and allows custom i
 * Multiple Language support
 * RESTful API
 * Extensible
+* Supported Platforms: macOS, Linux, Windows, Docker
 
-### Links
+### Resources
 
 * [Download](https://github.com/aelassas/wexflow/releases/latest)
 * [Installing](https://github.com/aelassas/wexflow/wiki/Installing)
