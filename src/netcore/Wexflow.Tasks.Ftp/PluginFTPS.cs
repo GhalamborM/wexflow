@@ -21,6 +21,8 @@ namespace Wexflow.Tasks.Ftp
                 case EncryptionMode.Implicit:
                     _encryptionMode = FtpEncryptionMode.Implicit;
                     break;
+                default:
+                    break;
             }
         }
 
@@ -49,9 +51,9 @@ namespace Wexflow.Tasks.Ftp
 
         public override FileInf[] List()
         {
-            List<FileInf> files = new();
+            var files = new List<FileInf>();
 
-            FtpClient client = new()
+            var client = new FtpClient
             {
                 Host = Server,
                 Port = Port,
@@ -67,7 +69,7 @@ namespace Wexflow.Tasks.Ftp
             client.Config.EncryptionMode = _encryptionMode;
             client.Config.ValidateAnyCertificate = true;
             client.ValidateCertificate += OnValidateCertificate;
-            client.Connect();
+            client.AutoConnect();
             client.SetWorkingDirectory(Path);
 
             var ftpFiles = PluginFtp.ListFiles(client, Task.Id);
@@ -85,7 +87,7 @@ namespace Wexflow.Tasks.Ftp
 
         public override void Upload(FileInf file)
         {
-            FtpClient client = new() { Host = Server, Port = Port, Credentials = new NetworkCredential(User, Password) };
+            var client = new FtpClient { Host = Server, Port = Port, Credentials = new NetworkCredential(User, Password) };
 
             if (DebugLogs)
             {
@@ -96,7 +98,7 @@ namespace Wexflow.Tasks.Ftp
             client.Config.DataConnectionType = FtpDataConnectionType.PASV;
             client.Config.EncryptionMode = _encryptionMode;
 
-            client.Connect();
+            client.AutoConnect();
             client.SetWorkingDirectory(Path);
 
             PluginFtp.UploadFile(client, file);
@@ -112,7 +114,7 @@ namespace Wexflow.Tasks.Ftp
 
         public override void Download(FileInf file)
         {
-            FtpClient client = new()
+            var client = new FtpClient
             {
                 Host = Server,
                 Port = Port,
@@ -127,7 +129,7 @@ namespace Wexflow.Tasks.Ftp
             }
 
             client.ValidateCertificate += OnValidateCertificate;
-            client.Connect();
+            client.AutoConnect();
             client.SetWorkingDirectory(Path);
 
             PluginFtp.DownloadFile(client, file, Task);
@@ -138,7 +140,7 @@ namespace Wexflow.Tasks.Ftp
 
         public override void Delete(FileInf file)
         {
-            FtpClient client = new()
+            var client = new FtpClient
             {
                 Host = Server,
                 Port = Port,
@@ -152,7 +154,7 @@ namespace Wexflow.Tasks.Ftp
             }
 
             client.ValidateCertificate += OnValidateCertificate;
-            client.Connect();
+            client.AutoConnect();
             client.SetWorkingDirectory(Path);
 
             client.DeleteFile(file.Path);

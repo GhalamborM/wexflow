@@ -25,6 +25,8 @@ namespace Wexflow.Tasks.ApproveRecord
         public string OnStopped { get; }
         public bool DeleteWorkflowOnApproval { get; }
 
+        private static readonly char[] separator = [','];
+
         public ApproveRecord(XElement xe, Workflow wf) : base(xe, wf)
         {
             RecordId = GetSetting("record");
@@ -39,8 +41,9 @@ namespace Wexflow.Tasks.ApproveRecord
             DeleteWorkflowOnApproval = bool.Parse(GetSetting("deleteWorkflowOnApproval", "false"));
         }
 
-        public override TaskStatus Run()
+        public async override System.Threading.Tasks.Task<TaskStatus> RunAsync()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info($"Approval process starting on the reocrd {RecordId} ...");
 
             var status = Core.Status.Success;
@@ -164,6 +167,7 @@ namespace Wexflow.Tasks.ApproveRecord
                                         var reminderNotificationDone = false;
                                         while (true)
                                         {
+                                            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                                             // notification onRecordDeleted
                                             record = Workflow.Database.GetRecord(RecordId);
                                             if (record == null)
@@ -603,7 +607,7 @@ namespace Wexflow.Tasks.ApproveRecord
                                                 break;
                                             }
 
-                                            Thread.Sleep(1000);
+                                            await System.Threading.Tasks.Task.Delay(1000, Workflow.CancellationTokenSource.Token);
                                         }
                                     }
                                 }
@@ -637,7 +641,7 @@ namespace Wexflow.Tasks.ApproveRecord
                     status = Core.Status.Error;
                 }
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 var record = Workflow.Database.GetRecord(RecordId);
                 if (record != null)
@@ -703,7 +707,10 @@ namespace Wexflow.Tasks.ApproveRecord
             }
             finally
             {
-                WaitOne();
+                if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                {
+                  WaitOne();   
+                }
             }
 
             Info("Approval process finished.");
@@ -720,11 +727,11 @@ namespace Wexflow.Tasks.ApproveRecord
 
         private Task[] GetTasks(string evt)
         {
-            List<Task> tasks = new();
+            List<Task> tasks = [];
 
             if (!string.IsNullOrEmpty(evt))
             {
-                var ids = evt.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                var ids = evt.Split(separator, StringSplitOptions.RemoveEmptyEntries);
                 foreach (var id in ids)
                 {
                     var taskId = int.Parse(id.Trim());
@@ -733,7 +740,7 @@ namespace Wexflow.Tasks.ApproveRecord
                 }
             }
 
-            return tasks.ToArray();
+            return [.. tasks];
         }
 
         private static void Send(string host, int port, bool enableSsl, string user, string password, string to, string from, string subject, string body)

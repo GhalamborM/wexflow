@@ -1,5 +1,5 @@
-﻿using System;
-using System.Drawing;
+﻿using SkiaSharp;
+using System;
 using System.IO;
 using System.Runtime.Versioning;
 using System.Threading;
@@ -27,6 +27,7 @@ namespace Wexflow.Tasks.ImagesCropper
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Cropping images...");
             var status = Status.Success;
             var succeeded = true;
@@ -37,13 +38,17 @@ namespace Wexflow.Tasks.ImagesCropper
                 var images = SelectFiles();
                 foreach (var image in images)
                 {
+                    Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                     var destPath = Path.Combine(Workflow.WorkflowTempFolder, image.FileName);
                     succeeded &= Crop(image.Path, destPath);
                     if (!atLeastOneSuccess && succeeded)
                     {
                         atLeastOneSuccess = true;
                     }
-                    WaitOne();
+                    if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        WaitOne();
+                    }
                 }
 
                 if (!succeeded && atLeastOneSuccess)
@@ -55,7 +60,7 @@ namespace Wexflow.Tasks.ImagesCropper
                     status = Status.Error;
                 }
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }
@@ -73,14 +78,22 @@ namespace Wexflow.Tasks.ImagesCropper
         {
             try
             {
-                using var src = Image.FromFile(srcPath);
-                using var dest = Crop(src, X, Y, Width, Height);
-                dest.Save(destPath);
+                using var skBitmap = SKBitmap.Decode(srcPath);
+
+                using var pixmap = new SKPixmap(skBitmap.Info, skBitmap.GetPixels());
+                var rectI = new SKRectI(X, Y, X + Width, Y + Height);
+
+                var subset = pixmap.ExtractSubset(rectI);
+
+                using var codec = SKCodec.Create(srcPath);
+                using var data = subset.Encode(codec.EncodedFormat, 80);
+                File.WriteAllBytes(destPath, data.ToArray());
+
                 Files.Add(new FileInf(destPath, Id));
                 InfoFormat("The image {0} was cropped -> {3}", srcPath, Width, Height, destPath);
                 return true;
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }
@@ -89,18 +102,6 @@ namespace Wexflow.Tasks.ImagesCropper
                 ErrorFormat("An error occured while cropping the image {0}: {1}", srcPath, e.Message);
                 return false;
             }
-        }
-
-        private static Image Crop(Image src, int x, int y, int width, int height)
-        {
-            Rectangle cropRect = new(x, y, width, height);
-            Bitmap target = new(cropRect.Width, cropRect.Height);
-
-            using var g = Graphics.FromImage(target);
-            g.DrawImage(src, new Rectangle(0, 0, target.Width, target.Height),
-                cropRect,
-                GraphicsUnit.Pixel);
-            return target;
         }
     }
 }

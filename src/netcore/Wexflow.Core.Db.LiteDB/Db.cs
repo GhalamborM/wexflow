@@ -1,6 +1,7 @@
 ﻿using LiteDB;
 using LiteDB.Engine;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -8,7 +9,7 @@ namespace Wexflow.Core.Db.LiteDB
 {
     public sealed class Db : Core.Db.Db
     {
-        private static readonly object Padlock = new();
+        private static readonly object _padlock = new object();
         private static LiteDatabase _db;
 
         public Db(string connectionString) : base(connectionString)
@@ -24,7 +25,7 @@ namespace Wexflow.Core.Db.LiteDB
 
             var statusCountCol = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
 
-            StatusCount statusCount = new()
+            var statusCount = new StatusCount
             {
                 PendingCount = 0,
                 RunningCount = 0,
@@ -40,17 +41,27 @@ namespace Wexflow.Core.Db.LiteDB
             // Entries
             ClearEntries();
 
-            // Insert default user if necessary
+            // Insert admin user if it does not exist
+            // Backward compatibility: update admin password from MD5/SHA256 hash to PBKDF2 of "wexflow2018"
             var usersCol = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
-            if (usersCol.Count() == 0)
+            var user = usersCol.FindOne(u => u.Username == "admin");
+            if (user == null)
             {
                 InsertDefaultUser();
+            }
+            else
+            {
+                if (IsMd5(user.Password) || IsSha256(user.Password))
+                {
+                    user.Password = HashPassword("wexflow2018");
+                    _ = usersCol.Update(user);
+                }
             }
         }
 
         public override void ClearStatusCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 _ = col.DeleteMany(_ => true);
@@ -59,7 +70,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void ClearEntries()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
                 _ = col.DeleteMany(_ => true);
@@ -68,7 +79,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override Core.Db.StatusCount GetStatusCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.FindAll().FirstOrDefault();
@@ -78,7 +89,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void IncrementPendingCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.FindAll().FirstOrDefault();
@@ -92,7 +103,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void DecrementPendingCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.FindAll().FirstOrDefault();
@@ -106,7 +117,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void IncrementRunningCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.FindAll().FirstOrDefault();
@@ -120,7 +131,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void DecrementRunningCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.FindAll().FirstOrDefault();
@@ -134,7 +145,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void IncrementDoneCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.FindAll().FirstOrDefault();
@@ -164,7 +175,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void IncrementFailedCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.FindAll().FirstOrDefault();
@@ -178,7 +189,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void IncrementRejectedCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.FindAll().FirstOrDefault();
@@ -208,7 +219,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void IncrementWarningCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.FindAll().FirstOrDefault();
@@ -238,7 +249,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void IncrementDisabledCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.FindAll().FirstOrDefault();
@@ -268,7 +279,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void IncrementStoppedCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.FindAll().FirstOrDefault();
@@ -320,7 +331,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.Entry> GetEntries()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
                 return col.FindAll();
@@ -329,16 +340,20 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override Core.Db.Entry GetEntry(int workflowId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
-                return col.FindOne(e => e.WorkflowId == workflowId);
+                //return col.FindOne(e => e.WorkflowId == WorkflowId);
+                var query = Query.All("StatusDate", Query.Descending);
+                query.Where.Add(Query.EQ("WorkflowId", workflowId));
+
+                return col.FindOne(query);
             }
         }
 
         public override Core.Db.Entry GetEntry(int workflowId, Guid jobId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
                 return col.FindOne(e => e.WorkflowId == workflowId && e.JobId == jobId.ToString());
@@ -347,10 +362,10 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void InsertEntry(Core.Db.Entry entry)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
-                Entry ie = new()
+                var ie = new Entry
                 {
                     Description = entry.Description,
                     LaunchType = entry.LaunchType,
@@ -376,10 +391,10 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void UpdateEntry(string id, Core.Db.Entry entry)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
-                Entry e = new()
+                var e = new Entry
                 {
                     Id = int.Parse(id),
                     Description = entry.Description,
@@ -408,7 +423,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void InsertUser(Core.Db.User user)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 user.CreatedOn = DateTime.Now;
@@ -429,7 +444,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void UpdatePassword(string username, string password)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var dbUser = col.FindOne(u => u.Username == username);
@@ -440,7 +455,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void UpdateUser(string id, Core.Db.User user)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var i = int.Parse(id);
@@ -456,7 +471,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void UpdateUsernameAndEmailAndUserProfile(string userId, string username, string email, UserProfile up)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var i = int.Parse(userId);
@@ -471,7 +486,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void DeleteUser(string username, string password)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var user = col.FindOne(u => u.Username == username);
@@ -489,7 +504,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override Core.Db.User GetUser(string username)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var user = col.FindOne(u => u.Username == username);
@@ -499,7 +514,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override Core.Db.User GetUserById(string userId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var id = int.Parse(userId);
@@ -510,7 +525,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override string GetPassword(string username)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var user = col.FindOne(u => u.Username == username);
@@ -520,7 +535,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.User> GetUsers()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 return col.FindAll();
@@ -529,7 +544,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.User> GetUsers(string keyword, UserOrderBy uo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var keywordToLower = keyword.ToLower();
@@ -570,6 +585,9 @@ namespace Wexflow.Core.Db.LiteDB
                         {
                             return col.Find(Query.All("Username", Query.Descending));
                         }
+
+                    default:
+                        break;
                 }
 
                 return Array.Empty<User>();
@@ -578,7 +596,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.User> GetAdministrators(string keyword, UserOrderBy uo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var keywordToLower = keyword.ToLower();
@@ -626,6 +644,9 @@ namespace Wexflow.Core.Db.LiteDB
                             q.Where.Add(Query.EQ("UserProfile", UserProfile.Administrator.ToString()));
                             return col.Find(q);
                         }
+
+                    default:
+                        break;
                 }
 
                 return Array.Empty<User>();
@@ -634,10 +655,10 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void InsertHistoryEntry(Core.Db.HistoryEntry entry)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
-                HistoryEntry he = new()
+                var he = new HistoryEntry
                 {
                     Description = entry.Description,
                     LaunchType = entry.LaunchType,
@@ -683,7 +704,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.HistoryEntry> GetHistoryEntries()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
                 return col.FindAll();
@@ -692,7 +713,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.HistoryEntry> GetHistoryEntries(string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var keywordToUpper = keyword.ToUpper();
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
@@ -702,7 +723,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.HistoryEntry> GetHistoryEntries(string keyword, int page, int entriesCount)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var keywordToUpper = keyword.ToUpper();
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
@@ -712,7 +733,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.HistoryEntry> GetHistoryEntries(string keyword, DateTime from, DateTime to, int page, int entriesCount, EntryOrderBy heo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
                 var keywordToLower = keyword.ToLower();
@@ -962,6 +983,9 @@ namespace Wexflow.Core.Db.LiteDB
                             , skip
                             , entriesCount
                         );
+
+                    default:
+                        break;
                 }
 
                 return Array.Empty<HistoryEntry>();
@@ -970,7 +994,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.Entry> GetEntries(string keyword, DateTime from, DateTime to, int page, int entriesCount, EntryOrderBy eo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
                 var keywordToLower = keyword.ToLower();
@@ -1220,6 +1244,9 @@ namespace Wexflow.Core.Db.LiteDB
                             , skip
                             , entriesCount
                         );
+
+                    default:
+                        break;
                 }
 
                 return Array.Empty<Entry>();
@@ -1228,7 +1255,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override long GetHistoryEntriesCount(string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var keywordToUpper = keyword.ToUpper();
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
@@ -1238,7 +1265,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override long GetHistoryEntriesCount(string keyword, DateTime from, DateTime to)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var keywordToLower = keyword.ToLower();
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
@@ -1252,7 +1279,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override long GetEntriesCount(string keyword, DateTime from, DateTime to)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var keywordToLower = keyword.ToLower();
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
@@ -1266,7 +1293,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override DateTime GetHistoryEntryStatusDateMin()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
                 var q = col.Find(Query.All("StatusDate")).ToArray();
@@ -1276,7 +1303,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override DateTime GetHistoryEntryStatusDateMax()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
                 var q = col.Find(Query.All("StatusDate", Query.Descending)).ToArray();
@@ -1286,7 +1313,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override DateTime GetEntryStatusDateMin()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.Entry.DOCUMENT_NAME);
                 var q = col.Find(Query.All("StatusDate")).ToArray();
@@ -1296,7 +1323,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override DateTime GetEntryStatusDateMax()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.Entry.DOCUMENT_NAME);
                 var q = col.Find(Query.All("StatusDate", Query.Descending)).ToArray();
@@ -1306,10 +1333,10 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override string InsertWorkflow(Core.Db.Workflow workflow)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Workflow>(Core.Db.Workflow.DOCUMENT_NAME);
-                Workflow wf = new() { Xml = workflow.Xml };
+                var wf = new Workflow { Xml = workflow.Xml };
                 var res = col.Insert(wf);
                 return res.AsInt32.ToString();
             }
@@ -1317,17 +1344,17 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void UpdateWorkflow(string dbId, Core.Db.Workflow workflow)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Workflow>(Core.Db.Workflow.DOCUMENT_NAME);
-                Workflow wf = new() { Id = int.Parse(dbId), Xml = workflow.Xml };
+                var wf = new Workflow { Id = int.Parse(dbId), Xml = workflow.Xml };
                 _ = col.Update(wf);
             }
         }
 
         public override void DeleteWorkflow(string id)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Workflow>(Core.Db.Workflow.DOCUMENT_NAME);
                 var i = int.Parse(id);
@@ -1337,7 +1364,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void DeleteWorkflows(string[] ids)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Workflow>(Core.Db.Workflow.DOCUMENT_NAME);
                 _ = col.DeleteMany(e => ids.Contains(e.Id.ToString()));
@@ -1346,7 +1373,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.Workflow> GetWorkflows()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Workflow>(Core.Db.Workflow.DOCUMENT_NAME);
                 return col.FindAll();
@@ -1355,7 +1382,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override Core.Db.Workflow GetWorkflow(string id)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Workflow>(Core.Db.Workflow.DOCUMENT_NAME);
                 return col.FindById(int.Parse(id));
@@ -1364,10 +1391,10 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void InsertUserWorkflowRelation(Core.Db.UserWorkflow userWorkflow)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<UserWorkflow>(Core.Db.UserWorkflow.DOCUMENT_NAME);
-                UserWorkflow uw = new()
+                var uw = new UserWorkflow
                 {
                     UserId = userWorkflow.UserId,
                     WorkflowId = userWorkflow.WorkflowId
@@ -1378,7 +1405,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void DeleteUserWorkflowRelationsByUserId(string userId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<UserWorkflow>(Core.Db.UserWorkflow.DOCUMENT_NAME);
                 _ = col.DeleteMany(uw => uw.UserId == userId);
@@ -1387,7 +1414,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void DeleteUserWorkflowRelationsByWorkflowId(string workflowId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<UserWorkflow>(Core.Db.UserWorkflow.DOCUMENT_NAME);
                 _ = col.DeleteMany(uw => uw.WorkflowId == workflowId);
@@ -1396,7 +1423,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<string> GetUserWorkflows(string userId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<UserWorkflow>(Core.Db.UserWorkflow.DOCUMENT_NAME);
                 return col.Find(uw => uw.UserId == userId).Select(uw => uw.WorkflowId.ToString());
@@ -1405,7 +1432,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override bool CheckUserWorkflow(string userId, string workflowId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<UserWorkflow>(Core.Db.UserWorkflow.DOCUMENT_NAME);
                 var res = col.FindOne(uw => uw.UserId == userId && uw.WorkflowId == workflowId);
@@ -1415,7 +1442,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override string GetEntryLogs(string entryId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var id = int.Parse(entryId);
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
@@ -1426,7 +1453,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override string GetHistoryEntryLogs(string entryId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var id = int.Parse(entryId);
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
@@ -1437,7 +1464,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.User> GetNonRestricedUsers()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var users = col.Find(u => u.UserProfile == UserProfile.SuperAdministrator || u.UserProfile == UserProfile.Administrator).OrderBy(u => u.Username);
@@ -1447,10 +1474,10 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override string InsertRecord(Core.Db.Record record)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
-                Record r = new()
+                var r = new Record
                 {
                     Approved = record.Approved,
                     AssignedOn = record.AssignedOn,
@@ -1472,12 +1499,12 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void UpdateRecord(string recordId, Core.Db.Record record)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
                 var bsonId = int.Parse(recordId);
                 var recordFromDb = col.FindById(bsonId);
-                Record r = new()
+                var r = new Record
                 {
                     Id = bsonId,
                     Approved = record.Approved,
@@ -1501,7 +1528,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void DeleteRecords(string[] recordIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
                 _ = col.DeleteMany(r => recordIds.Contains(r.Id.ToString()));
@@ -1510,7 +1537,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override Core.Db.Record GetRecord(string id)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
                 var bsonId = int.Parse(id);
@@ -1521,7 +1548,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.Record> GetRecords(string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
                 var keywordToUpper = keyword.ToUpper();
@@ -1532,7 +1559,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.Record> GetRecordsCreatedBy(string createdBy)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
                 var records = col.Find(r => r.CreatedBy == createdBy).OrderBy(r => r.Name).ToList();
@@ -1542,7 +1569,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.Record> GetRecordsCreatedByOrAssignedTo(string createdBy, string assingedTo, string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
                 var keywordToUpper = keyword.ToUpper();
@@ -1553,10 +1580,10 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override string InsertVersion(Core.Db.Version version)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Version>(Core.Db.Version.DOCUMENT_NAME);
-                Version v = new()
+                var v = new Version
                 {
                     RecordId = version.RecordId,
                     CreatedOn = DateTime.Now,
@@ -1569,12 +1596,12 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void UpdateVersion(string versionId, Core.Db.Version version)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Version>(Core.Db.Version.DOCUMENT_NAME);
                 var bsonId = int.Parse(versionId);
                 var versionFromDb = col.FindById(bsonId);
-                Version v = new()
+                var v = new Version
                 {
                     Id = bsonId,
                     RecordId = version.RecordId,
@@ -1588,7 +1615,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void DeleteVersions(string[] versionIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Version>(Core.Db.Version.DOCUMENT_NAME);
                 _ = col.DeleteMany(v => versionIds.Contains(v.Id.ToString()));
@@ -1597,7 +1624,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.Version> GetVersions(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Version>(Core.Db.Version.DOCUMENT_NAME);
                 var versions = col.Find(v => v.RecordId == recordId).OrderBy(v => v.CreatedOn).ToList();
@@ -1607,20 +1634,20 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override Core.Db.Version GetLatestVersion(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Version>(Core.Db.Version.DOCUMENT_NAME);
-                var version = col.Find(v => v.RecordId == recordId).MaxBy(v => v.CreatedOn);
+                var version = col.Find(v => v.RecordId == recordId).OrderByDescending(v => v.CreatedOn).FirstOrDefault();
                 return version;
             }
         }
 
         public override string InsertNotification(Core.Db.Notification notification)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Notification>(Core.Db.Notification.DOCUMENT_NAME);
-                Notification n = new()
+                var n = new Notification
                 {
                     AssignedBy = notification.AssignedBy,
                     AssignedOn = notification.AssignedOn,
@@ -1635,7 +1662,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void MarkNotificationsAsRead(string[] notificationIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Notification>(Core.Db.Notification.DOCUMENT_NAME);
                 _ = col.UpdateMany(n => new Notification
@@ -1652,7 +1679,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void MarkNotificationsAsUnread(string[] notificationIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Notification>(Core.Db.Notification.DOCUMENT_NAME);
                 _ = col.UpdateMany(n => new Notification
@@ -1669,7 +1696,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void DeleteNotifications(string[] notificationIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Notification>(Core.Db.Notification.DOCUMENT_NAME);
                 _ = col.DeleteMany(n => notificationIds.Contains(n.Id.ToString()));
@@ -1678,7 +1705,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.Notification> GetNotifications(string assignedTo, string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Notification>(Core.Db.Notification.DOCUMENT_NAME);
                 var keywordToUpper = keyword.ToUpper();
@@ -1689,7 +1716,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override bool HasNotifications(string assignedTo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Notification>(Core.Db.Notification.DOCUMENT_NAME);
                 var notifications = col.Find(n => n.AssignedTo == assignedTo && !n.IsRead);
@@ -1700,10 +1727,10 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override string InsertApprover(Core.Db.Approver approver)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Approver>(Core.Db.Approver.DOCUMENT_NAME);
-                Approver a = new()
+                var a = new Approver
                 {
                     UserId = approver.UserId,
                     RecordId = approver.RecordId,
@@ -1718,12 +1745,12 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void UpdateApprover(string approverId, Core.Db.Approver approver)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Approver>(Core.Db.Approver.DOCUMENT_NAME);
                 var bsonId = int.Parse(approverId);
 
-                Approver a = new()
+                var a = new Approver
                 {
                     Id = bsonId,
                     UserId = approver.UserId,
@@ -1738,7 +1765,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void DeleteApproversByRecordId(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Approver>(Core.Db.Approver.DOCUMENT_NAME);
                 _ = col.DeleteMany(a => a.RecordId == recordId);
@@ -1747,7 +1774,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void DeleteApprovedApprovers(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Approver>(Core.Db.Approver.DOCUMENT_NAME);
                 _ = col.DeleteMany(a => a.Approved && a.RecordId == recordId);
@@ -1756,7 +1783,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void DeleteApproversByUserId(string userId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Approver>(Core.Db.Approver.DOCUMENT_NAME);
                 _ = col.DeleteMany(a => a.UserId == userId);
@@ -1765,7 +1792,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override IEnumerable<Core.Db.Approver> GetApprovers(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Approver>(Core.Db.Approver.DOCUMENT_NAME);
                 var approvers = col.Find(a => a.RecordId == recordId).ToList();
@@ -1775,7 +1802,7 @@ namespace Wexflow.Core.Db.LiteDB
 
         public override void Dispose()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 _db.Dispose();
                 _db = null;

@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
+using System;
 
 namespace Wexflow.Server.Contracts
 {
@@ -10,7 +12,7 @@ namespace Wexflow.Server.Contracts
         Cron
     }
 
-    public class WorkflowInfo : IComparable
+    public class WorkflowInfo : IComparable<WorkflowInfo>
     {
         public string DbId { get; set; }
 
@@ -52,6 +54,9 @@ namespace Wexflow.Server.Contracts
 
         public int RetryTimeout { get; set; }
 
+        [JsonConverter(typeof(StringEnumConverter))]
+        public Status Status { get; set; }
+
         public WorkflowInfo(string dbId,
             int id,
             Guid instanceId,
@@ -71,7 +76,8 @@ namespace Wexflow.Server.Contracts
             Variable[] localVariables,
             string startedOn,
             int retryCount,
-            int retryTimeout)
+            int retryTimeout,
+            Core.Db.Status jobStatus)
         {
             DbId = dbId;
             Id = id;
@@ -93,12 +99,9 @@ namespace Wexflow.Server.Contracts
             StartedOn = startedOn;
             RetryCount = retryCount;
             RetryTimeout = retryTimeout;
+            Status = (Status)jobStatus;
         }
 
-        public int CompareTo(object obj)
-        {
-            var wfi = (WorkflowInfo)obj;
-            return wfi.Id.CompareTo(Id);
-        }
+        public int CompareTo(WorkflowInfo other) => other.Id.CompareTo(Id);
     }
 }

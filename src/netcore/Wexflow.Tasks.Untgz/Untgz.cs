@@ -20,6 +20,7 @@ namespace Wexflow.Tasks.Untgz
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Extracting TAR.GZ archives...");
 
             bool success;
@@ -28,7 +29,7 @@ namespace Wexflow.Tasks.Untgz
             {
                 success = ExtractFiles(ref atLeastOneSuccess);
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }
@@ -64,6 +65,7 @@ namespace Wexflow.Tasks.Untgz
                 {
                     try
                     {
+                        Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                         var destFolder = Path.Combine(DestDir
                             , $"{Path.GetFileNameWithoutExtension(tgz.Path)}_{DateTime.Now:yyyy-MM-dd-HH-mm-ss-fff}");
                         _ = Directory.CreateDirectory(destFolder);
@@ -81,7 +83,7 @@ namespace Wexflow.Tasks.Untgz
                             atLeastOneSuccess = true;
                         }
                     }
-                    catch (ThreadInterruptedException)
+                    catch (OperationCanceledException)
                     {
                         throw;
                     }
@@ -92,7 +94,10 @@ namespace Wexflow.Tasks.Untgz
                     }
                     finally
                     {
-                        WaitOne();
+                        if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                        {
+                            WaitOne();
+                        }
                     }
                 }
             }
@@ -101,8 +106,8 @@ namespace Wexflow.Tasks.Untgz
 
         private static void ExtractTgz(string gzArchiveName, string destFolder)
         {
-            Stream inStream = File.OpenRead(gzArchiveName);
-            Stream gzipStream = new GZipInputStream(inStream);
+            var inStream = File.OpenRead(gzArchiveName);
+            var gzipStream = new GZipInputStream(inStream);
 
             var tarArchive = TarArchive.CreateInputTarArchive(gzipStream, Encoding.UTF8);
             tarArchive.ExtractContents(destFolder);

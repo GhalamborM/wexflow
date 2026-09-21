@@ -1,5 +1,5 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
-using System.Drawing;
+using SkiaSharp;
 using System.IO;
 using System.Runtime.Versioning;
 
@@ -52,12 +52,12 @@ namespace Wexflow.NetCore.Tests
         }
 
         [TestMethod]
-        public void ImagesResizerTest()
+        public async System.Threading.Tasks.Task ImagesResizerTest()
         {
             Assert.AreEqual(false, File.Exists(Dest1));
             Assert.AreEqual(false, File.Exists(Dest2));
             Assert.AreEqual(false, File.Exists(Dest3));
-            _ = Helper.StartWorkflow(73);
+            _ = await Helper.StartWorkflow(73);
             Assert.AreEqual(true, File.Exists(Dest1));
             Assert.AreEqual(true, File.Exists(Dest2));
             Assert.AreEqual(true, File.Exists(Dest3));
@@ -70,7 +70,7 @@ namespace Wexflow.NetCore.Tests
 
         private static void CheckImageSize(string path)
         {
-            using var image = Image.FromFile(path);
+            using var image = SKImage.FromEncodedData(path);
             Assert.AreEqual(512, image.Width);
             Assert.AreEqual(384, image.Height);
         }

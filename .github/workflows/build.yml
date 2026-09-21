@@ -1,0 +1,41 @@
+name: build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    env:
+      SOLUTION_FILE: Wexflow.sln
+      BUILD_CONFIGURATION: Release
+      BUILD_PLATFORM: "x64"
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    # 1. Setup MSBuild for the .NET 4.8 projects
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    # 2. Setup .NET 10 SDK for the modern projects
+    - name: Setup .NET Core SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.x' # Fetches the latest stable .NET 10 release
+
+    # 3. Restore all packages via MSBuild (forcing x64 architecture)
+    - name: Restore NuGet Packages
+      run: |
+        msbuild ${{ env.SOLUTION_FILE }} -t:Restore -p:Configuration=${{ env.BUILD_CONFIGURATION }} -p:Platform="${{ env.BUILD_PLATFORM }}" -p:MSBuildArchitecture=x64
+
+    # 4. Build the hybrid solution (forcing x64 architecture)
+    - name: Build Solution
+      run: |
+        msbuild ${{ env.SOLUTION_FILE }} -p:Configuration=${{ env.BUILD_CONFIGURATION }} -p:Platform="${{ env.BUILD_PLATFORM }}" -p:MSBuildArchitecture=x64

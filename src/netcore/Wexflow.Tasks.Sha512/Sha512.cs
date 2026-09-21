@@ -17,6 +17,7 @@ namespace Wexflow.Tasks.Sha512
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Generating SHA-512 hashes...");
 
             var success = true;
@@ -34,7 +35,8 @@ namespace Wexflow.Tasks.Sha512
                 {
                     try
                     {
-                        var sha1 = GetSha1(file.Path);
+                        Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
+                        var sha1 = GetSha512(file.Path);
                         xdoc.Root?.Add(new XElement("File",
                                 new XAttribute("path", file.Path),
                                 new XAttribute("name", file.FileName),
@@ -46,7 +48,7 @@ namespace Wexflow.Tasks.Sha512
                             atLeastOneSucceed = true;
                         }
                     }
-                    catch (ThreadInterruptedException)
+                    catch (OperationCanceledException)
                     {
                         throw;
                     }
@@ -57,7 +59,10 @@ namespace Wexflow.Tasks.Sha512
                     }
                     finally
                     {
-                        WaitOne();
+                        if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                        {
+                            WaitOne();
+                        }
                     }
                 }
                 xdoc.Save(md5Path);
@@ -79,7 +84,7 @@ namespace Wexflow.Tasks.Sha512
             return new TaskStatus(status, false);
         }
 
-        private static string GetSha1(string filePath)
+        private static string GetSha512(string filePath)
         {
             using var stream = File.OpenRead(filePath);
             using var alg = SHA512.Create();

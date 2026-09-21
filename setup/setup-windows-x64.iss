@@ -1,5 +1,5 @@
 #define MyAppName "Wexflow"
-#define MyAppVersion "7.9"
+#define MyAppVersion "10.2"
 #define MyAppPublisher "Akram El Assas"
 #define MyAppPublisherURL "https://wexflow.github.io/"
 #define MyAppExeName "Wexflow.Clients.Manager.exe"
@@ -28,7 +28,8 @@ SolidCompression=yes
 ; done in "64-bit mode" on x64, meaning it should use the native
 ; 64-bit Program Files directory and the 64-bit view of the registry.
 ; On all other architectures it will install in "32-bit mode".
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 LicenseFile="..\LICENSE.txt"
 
@@ -39,7 +40,7 @@ SetupAppRunningError=Setup has detected that %1 is currently running.%n%nPlease 
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}";
 ;Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked; OnlyBelowVersion: 0,6.1
 
 [Types]
@@ -51,6 +52,7 @@ Name: "program"; Description: "Program Files"; Types: full custom; Flags: fixed
 Name: "samples"; Description: "Workflow samples"; Types: full
 
 [Files]
+Source: "..\src\net\Wexflow.Clients.Manager\Wexflow.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Wexflow server
 ;Source: "..\src\net\Wexflow.Core.Db.MongoDB\bin\x64\Release\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Core.Db.SQLite\bin\x64\Release\x64\SQLite.Interop.dll"; DestDir: "{app}"; Flags: ignoreversion
@@ -63,35 +65,37 @@ Source: "..\src\net\Wexflow.Tasks.SevenZip\bin\x64\Release\x64\7z.dll"; DestDir:
 ;Source: "..\src\net\Wexflow.Server\bin\x64\Release\x64\MediaInfo.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Tasks.MediaInfo\bin\x64\Release\x64\MediaInfo.dll"; DestDir: "{app}"; Flags: ignoreversion
 ;Source: "..\libs\chromedriver.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\src\net\Wexflow.Tasks.WebToScreenshot\bin\x64\Release\selenium-manager\*"; DestDir: "{app}\selenium-manager"; Flags: ignoreversion recursesubdirs
+Source: "..\src\net\Wexflow.Tasks.WebToScreenshot\bin\x64\Release\selenium-manager\*"; DestDir: "{app}\selenium-manager"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Wexflow Manager
 Source: "..\src\net\Wexflow.Clients.Manager\bin\x64\Release\Wexflow.Clients.Manager.exe"; DestDir: "{app}\Manager"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Clients.Manager\bin\x64\Release\Wexflow.Clients.Manager.exe.config"; DestDir: "{app}\Manager"; Flags: ignoreversion
-Source: "..\src\net\Wexflow.Clients.Manager\bin\x64\Release\Wexflow.Core.Service.Client.dll"; DestDir: "{app}\Manager"; Flags: ignoreversion
-Source: "..\src\net\Wexflow.Clients.Manager\bin\x64\Release\Newtonsoft.Json.dll"; DestDir: "{app}\Manager"; Flags: ignoreversion
-Source: "..\src\net\Wexflow.Clients.Manager\bin\x64\Release\Wexflow.Core.Service.Contracts.dll"; DestDir: "{app}\Manager"; Flags: ignoreversion
+Source: "..\src\net\Wexflow.Clients.Manager\bin\x64\Release\*.dll"; DestDir: "{app}\Manager"; Flags: ignoreversion
 
 ; Wexflow.Clients.CommandLine
 Source: "..\src\net\Wexflow.Clients.CommandLine\bin\x64\Release\Wexflow.Clients.CommandLine.exe"; DestDir: "{app}\Wexflow.Clients.CommandLine"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Clients.CommandLine\bin\x64\Release\Wexflow.Clients.CommandLine.exe.config"; DestDir: "{app}\Wexflow.Clients.CommandLine"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Clients.CommandLine\bin\x64\Release\*.dll"; DestDir: "{app}\Wexflow.Clients.CommandLine"; Flags: ignoreversion
 
-; Wexflow Backend
-Source: "..\src\backend\Wexflow.Backend\*.html"; DestDir: "{app}\Backend"; Flags: ignoreversion
+; Wexflow Admin
+Source: "..\src\admin\Wexflow.Admin\*.html"; DestDir: "{app}\Admin"; Flags: ignoreversion
 
-Source: "..\src\backend\Wexflow.Backend\images\*"; DestDir: "{app}\Backend\images"; Flags: ignoreversion
-Source: "..\src\backend\Wexflow.Backend\assets\*"; DestDir: "{app}\Backend\assets"; Flags: ignoreversion
+Source: "..\src\admin\Wexflow.Admin\images\*"; DestDir: "{app}\Admin\images"; Flags: ignoreversion
+Source: "..\src\admin\Wexflow.Admin\assets\*"; DestDir: "{app}\Admin\assets"; Flags: ignoreversion
 
-Source: "..\src\backend\Wexflow.Backend\css\*.css"; DestDir: "{app}\Backend\css"; Flags: ignoreversion
-Source: "..\src\backend\Wexflow.Backend\css\images\*"; DestDir: "{app}\Backend\css\images"; Flags: ignoreversion
+Source: "..\src\admin\Wexflow.Admin\css\*.css"; DestDir: "{app}\Admin\css"; Flags: ignoreversion
+Source: "..\src\admin\Wexflow.Admin\css\images\*"; DestDir: "{app}\Admin\css\images"; Flags: ignoreversion
 
-Source: "..\src\backend\Wexflow.Backend\js\*.js"; DestDir: "{app}\Backend\js"; Flags: ignoreversion
+Source: "..\src\admin\Wexflow.Admin\js\*"; DestDir: "{app}\Admin\js"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\src\admin\Wexflow.Admin\js\settings.net.js"; DestDir: "{app}\Admin\js"; DestName: "settings.js"; Flags: ignoreversion
 
 ; Wexflow's Documentation
 Source: "..\src\net\Wexflow.Core\Workflow.xml"; DestDir: "{app}\Documentation\"; DestName: "_Workflow.xml"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Tasks.CsvToXml\CsvToXml.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Tasks.FileExists\FileExists.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
+Source: "..\src\net\Wexflow.Tasks.FileMatch\FileMatch.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
+Source: "..\src\net\Wexflow.Tasks.FileNotExist\FileNotExist.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
+Source: "..\src\net\Wexflow.Tasks.FileNotMatch\FileNotMatch.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Tasks.FilesConcat\FilesConcat.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Tasks.FilesCopier\FilesCopier.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Tasks.FilesExist\FilesExist.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
@@ -159,7 +163,6 @@ Source: "..\src\net\Wexflow.Tasks.IsoExtractor\IsoExtractor.xml"; DestDir: "{app
 Source: "..\src\net\Wexflow.Tasks.SevenZip\SevenZip.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Tasks.TextToSpeech\TextToSpeech.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Tasks.SpeechToText\SpeechToText.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
-Source: "..\src\net\Wexflow.Tasks.FileMatch\FileMatch.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Tasks.Ping\Ping.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Tasks.WebToScreenshot\WebToScreenshot.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
 Source: "..\src\net\Wexflow.Tasks.WebToHtml\WebToHtml.xml"; DestDir: "{app}\Documentation"; Flags: ignoreversion
@@ -268,10 +271,10 @@ Source: "..\src\net\Wexflow.Scripts.LiteDB\bin\x64\Release\*.dll"; DestDir: "{ap
 ;Source: "..\src\net\Wexflow.Scripts.Firebird\bin\x64\Release\*.dll"; DestDir: "{app}\Wexflow.Scripts.Firebird"; Flags: ignoreversion recursesubdirs
 
 ; Wexflow.Scripts.Oracle
-Source: "..\src\net\Wexflow.Scripts.Oracle\bin\x64\Release\Wexflow.Scripts.Oracle.exe"; DestDir: "{app}\Wexflow.Scripts.Oracle"; Flags: ignoreversion recursesubdirs
-Source: ".\net\Wexflow.Scripts.Oracle\Wexflow.Scripts.Oracle.exe.config"; DestDir: "{app}\Wexflow.Scripts.Oracle"; Flags: ignoreversion recursesubdirs
-Source: "..\src\net\Wexflow.Core.Db.Oracle\bin\x64\Release\*.dll"; DestDir: "{app}\Wexflow.Scripts.Oracle"; Flags: ignoreversion recursesubdirs
-Source: "..\src\net\Wexflow.Scripts.Oracle\bin\x64\Release\*.dll"; DestDir: "{app}\Wexflow.Scripts.Oracle"; Flags: ignoreversion recursesubdirs
+;Source: "..\src\net\Wexflow.Scripts.Oracle\bin\x64\Release\Wexflow.Scripts.Oracle.exe"; DestDir: "{app}\Wexflow.Scripts.Oracle"; Flags: ignoreversion recursesubdirs
+;Source: ".\net\Wexflow.Scripts.Oracle\Wexflow.Scripts.Oracle.exe.config"; DestDir: "{app}\Wexflow.Scripts.Oracle"; Flags: ignoreversion recursesubdirs
+;Source: "..\src\net\Wexflow.Core.Db.Oracle\bin\x64\Release\*.dll"; DestDir: "{app}\Wexflow.Scripts.Oracle"; Flags: ignoreversion recursesubdirs
+;Source: "..\src\net\Wexflow.Scripts.Oracle\bin\x64\Release\*.dll"; DestDir: "{app}\Wexflow.Scripts.Oracle"; Flags: ignoreversion recursesubdirs
 
 ; Wexflow.Scripts.MariaDB
 ;Source: "..\src\net\Wexflow.Scripts.MariaDB\bin\x64\Release\Wexflow.Scripts.MariaDB.exe"; DestDir: "{app}\Wexflow.Scripts.MariaDB"; Flags: ignoreversion recursesubdirs
@@ -286,10 +289,14 @@ Source: "..\src\net\Wexflow.Scripts.RunAllWorkflows\bin\x64\Release\*.dll"; Dest
 
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
+[Run]
+Filename: "{cmd}"; Parameters: "/C del /Q ""{app}\Admin\js\settings.net.js"""; StatusMsg: "Cleaning up config files..."
+Filename: "{cmd}"; Parameters: "/C del /Q ""{app}\Admin\js\settings.netcore.js"""; StatusMsg: "Cleaning up config files..."
+
 [Icons]
 Name: "{commonprograms}\{#MyAppName}\Manager"; Filename: "{app}\Manager\{#MyAppExeName}";
-Name: "{commonprograms}\{#MyAppName}\Backend"; Filename: "{app}\Backend\index.html";
-Name: "{commonprograms}\{#MyAppName}\Swagger"; Filename: "http://localhost:8000";
+Name: "{commonprograms}\{#MyAppName}\Admin Panel"; Filename: "http://localhost:8000/"; IconFilename: "{app}\Wexflow.ico";
+Name: "{commonprograms}\{#MyAppName}\Swagger"; Filename: "http://localhost:8000/swagger/"; IconFilename: "{app}\Wexflow.ico";
 ;Name: "{commonprograms}\{#MyAppName}\Start Wexflow Windows Service"; Filename: {sys}\sc.exe; Parameters: "start Wexflow" ; IconFilename: "{app}\Wexflow.ico";
 ;Name: "{commonprograms}\{#MyAppName}\Stop Wexflow Windows Service"; Filename: {sys}\sc.exe; Parameters: "stop Wexflow" ; IconFilename: "{app}\Wexflow.ico";
 Name: "{commonprograms}\{#MyAppName}\Configuration"; Filename: "C:\Wexflow\";
@@ -303,12 +310,14 @@ Name: "{commonprograms}\{#MyAppName}\Install MySQL samples"; Filename: "{app}\We
 Name: "{commonprograms}\{#MyAppName}\Install SQLite samples"; Filename: "{app}\Wexflow.Scripts.SQLite\Wexflow.Scripts.SQLite.exe";
 Name: "{commonprograms}\{#MyAppName}\Install LiteDB samples"; Filename: "{app}\Wexflow.Scripts.LiteDB\Wexflow.Scripts.LiteDB.exe";
 ;Name: "{commonprograms}\{#MyAppName}\Install Firebird samples"; Filename: "{app}\Wexflow.Scripts.Firebird\Wexflow.Scripts.Firebird.exe";
-Name: "{commonprograms}\{#MyAppName}\Install Oracle samples"; Filename: "{app}\Wexflow.Scripts.Oracle\Wexflow.Scripts.Oracle.exe";
+;Name: "{commonprograms}\{#MyAppName}\Install Oracle samples"; Filename: "{app}\Wexflow.Scripts.Oracle\Wexflow.Scripts.Oracle.exe";
 ;Name: "{commonprograms}\{#MyAppName}\Install MariaDB samples"; Filename: "{app}\Wexflow.Scripts.MariaDB\Wexflow.Scripts.MariaDB.exe";
 ;Name: "{commonprograms}\{#MyAppName}\Run All Workflows"; Filename: "{app}\Wexflow.Scripts.RunAllWorkflows\Wexflow.Scripts.RunAllWorkflows.exe";
 Name: "{commonprograms}\{#MyAppName}\Uninstall"; Filename: "{uninstallexe}";
 
-Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\Manager\{#MyAppExeName}"; Tasks: desktopicon
+;Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\Manager\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{commondesktop}\Wexflow Manager"; Filename: "{app}\Manager\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{commondesktop}\Wexflow Admin"; Filename: "http://localhost:8000/"; IconFilename: "{app}\Wexflow.ico"; Tasks: desktopicon
 ;Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\Manager\{#MyAppExeName}"; Tasks: quicklaunchicon
 
 [Run]
@@ -426,30 +435,21 @@ begin
   Result := sVersionString;
 end;
 
-function NumericVersion(sVersion: String): Integer;
+function NumericVersion(const Version: string): Integer;
 var
-  s1, s2, i: Integer;
-  sv : String;
+  Parts: TStringList;
 begin
-  s1 := 0;
-  for i := 1 to Length(sVersion) do
-  begin
-    sv := sVersion[i];
+  Parts := TStringList.Create;
+  try
+    Parts.Delimiter := '.';
+    Parts.DelimitedText := Version;
 
-    if (sv >= '0') and (sv <= '9') then
-      begin
-        s2 := StrToInt(sv);
-
-        if i = 1 then
-        begin
-          s2 := s2  * 10;
-        end;
-        
-        s1 := s1 + s2;
-      end;
+    Result :=
+      StrToIntDef(Parts[0], 0) * 1000 +
+      StrToIntDef(Parts[1], 0);
+  finally
+    Parts.Free;
   end;
-  
-  Result := s1;
 end;
 
 function InitializeSetup(): Boolean;
@@ -457,6 +457,10 @@ var
   sInstalledVersion, message: String;
   installedVersion, myAppVersion: Integer;
   v: Integer;
+  UninstKey: String;
+  Hives: array[0..1] of Integer;
+  Values: array[0..4] of String;
+  i, j: Integer;  
 begin
   Result := True;
   sInstalledVersion := GetInstalledVersion();
@@ -470,15 +474,15 @@ begin
 
     if installedVersion < myAppVersion  then 
     begin 
-      message := 'An older version of Wexflow is already installed. Would you like to replace it with this newer version?';
+      message := 'An older version of Wexflow is already installed. Would you like to upgrade to this newer version?';
     end 
     else if installedVersion > myAppVersion then
     begin
-      message := 'A newer version of Wexflow is already installed. Would you like to replace it with this older version?';
+      message := 'A newer version of Wexflow is already installed. Are you sure you want to downgrade to this older version?';
     end
-    else if installedVersion = myAppVersion then
+    else
     begin
-      message := 'The same version of Wexflow is already installed. Would you like to repair it?';
+      message := 'The same version of Wexflow is already installed. Would you like to reinstall it?';
     end;
 
     v := MsgBox(message, mbInformation, MB_YESNO);
@@ -487,6 +491,25 @@ begin
       Result := False;
     end;
   end;
+  
+  // Uninstall key path
+  UninstKey := ExpandConstant('SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupSetting("AppId")}_is1');
+
+  // Define the hives and value names to delete
+  Hives[0] := HKLM64;
+  Hives[1] := HKCU;
+  Values[0] := 'Inno Setup: Selected Tasks';
+  Values[1] := 'Inno Setup: Deselected Tasks';
+  Values[2] := 'Inno Setup: Selected Components';
+  Values[3] := 'Inno Setup: Deselected Components';
+  Values[4] := 'Inno Setup: Setup Type';
+
+  // Loop over hives and values to delete
+  for i := 0 to High(Hives) do
+    for j := 0 to High(Values) do
+      if RegValueExists(Hives[i], UninstKey, Values[j]) then
+        RegDeleteValue(Hives[i], UninstKey, Values[j]);
+  
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -509,3 +532,4 @@ begin
   Log('PrepareToInstall.ForceDirectories done');
   Result := '';  
 end;
+

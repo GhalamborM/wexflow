@@ -20,11 +20,13 @@ namespace Wexflow.Tests
         }
 
         [TestMethod]
-        public void MediaInfoTest()
+#pragma warning disable CS1998
+        public async System.Threading.Tasks.Task MediaInfoTest()
+#pragma warning restore CS1998
         {
             //string[] files = GetFiles();
             //Assert.AreEqual(0, files.Length);
-            //Helper.StartWorkflow(52);
+            //await Helper.StartWorkflow(52);
             //files = GetFiles();
             //Assert.AreEqual(1, files.Length);
             //string content = File.ReadAllText(files[0]);

@@ -1,6 +1,7 @@
 ﻿using Quartz;
 using Quartz.Impl;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.IO;
@@ -17,6 +18,7 @@ namespace Wexflow.Core
     /// </summary>
     public class WexflowEngine
     {
+        #region Properties
         /// <summary>
         /// Log level.
         /// </summary>
@@ -125,10 +127,7 @@ namespace Wexflow.Core
         /// Global variables file.
         /// </summary>
         public string GlobalVariablesFile { get; private set; }
-        /// <summary>
-        /// Global variables.
-        /// </summary>
-        public Variable[] GlobalVariables { get; private set; }
+        #endregion
 
         //
         // Quartz scheduler
@@ -226,11 +225,11 @@ namespace Wexflow.Core
                 case DbType.MariaDB:
                     Database = new Db.MariaDB.Db(ConnectionString);
                     break;
+                default:
+                    break;
             }
 
             Database?.Init();
-
-            LoadGlobalVariables();
 
             LoadWorkflows();
         }
@@ -284,24 +283,6 @@ namespace Wexflow.Core
             GlobalVariablesFile = GetWexflowSetting(xdoc, "globalVariablesFile");
         }
 
-        private void LoadGlobalVariables()
-        {
-            var variables = new List<Variable>();
-            var xdoc = XDocument.Load(GlobalVariablesFile);
-
-            foreach (var xvariable in xdoc.Descendants("Variable"))
-            {
-                var variable = new Variable
-                {
-                    Key = (xvariable.Attribute("name") ?? throw new InvalidOperationException("name attribute of global variable not found")).Value,
-                    Value = (xvariable.Attribute("value") ?? throw new InvalidOperationException("value attribute of global variable not found")).Value
-                };
-                variables.Add(variable);
-            }
-
-            GlobalVariables = variables.ToArray();
-        }
-
         private static string GetWexflowSetting(XDocument xdoc, string name)
         {
             try
@@ -347,7 +328,7 @@ namespace Wexflow.Core
                 var wf = new Workflow(
                        this
                     , 1
-                    , new Dictionary<Guid, Workflow>()
+                    , new ConcurrentDictionary<Guid, Workflow>()
                     , workflow.GetDbId()
                     , workflow.Xml
                     , TempFolder
@@ -355,7 +336,7 @@ namespace Wexflow.Core
                     , ApprovalFolder
                     , XsdPath
                     , Database
-                    , GlobalVariables);
+                    , GlobalVariablesFile);
                 Logger.InfoFormat("Workflow loaded: {0}", wf);
                 return wf;
             }
@@ -374,7 +355,7 @@ namespace Wexflow.Core
         /// <param name="userProfile">User profile.</param>
         /// <param name="schedule">Indicates whether to schedule the workflow or not.</param>
         /// <returns>Workflow db id.</returns>
-        public string SaveWorkflow(string userId, UserProfile userProfile, string xml, bool schedule)
+        public async System.Threading.Tasks.Task<string> SaveWorkflow(string userId, UserProfile userProfile, string xml, bool schedule)
         {
             try
             {
@@ -400,7 +381,7 @@ namespace Wexflow.Core
                             _ = new Workflow(
                               this
                             , 1
-                            , new Dictionary<Guid, Workflow>()
+                            , new ConcurrentDictionary<Guid, Workflow>()
                             , "-1"
                             , xml
                             , TempFolder
@@ -408,7 +389,7 @@ namespace Wexflow.Core
                             , ApprovalFolder
                             , XsdPath
                             , Database
-                            , GlobalVariables
+                            , GlobalVariablesFile
                             );
                         }
                         catch (Exception e)
@@ -430,7 +411,7 @@ namespace Wexflow.Core
                         Workflows.Add(newWorkflow);
                         if (schedule)
                         {
-                            ScheduleWorkflow(newWorkflow);
+                            await ScheduleWorkflow(newWorkflow);
                         }
                         return dbId;
                     }
@@ -442,7 +423,7 @@ namespace Wexflow.Core
                         _ = new Workflow(
                             this
                             , 1
-                            , new Dictionary<Guid, Workflow>()
+                            , new ConcurrentDictionary<Guid, Workflow>()
                             , "-1"
                             , xml
                             , TempFolder
@@ -450,7 +431,7 @@ namespace Wexflow.Core
                             , ApprovalFolder
                             , XsdPath
                             , Database
-                            , GlobalVariables
+                            , GlobalVariablesFile
                         );
                     }
                     catch (Exception e)
@@ -477,7 +458,7 @@ namespace Wexflow.Core
                         Workflows.Add(updatedWorkflow);
                         if (schedule)
                         {
-                            ScheduleWorkflow(updatedWorkflow);
+                            await ScheduleWorkflow(updatedWorkflow);
                         }
                         return changedWorkflow.DbId;
                     }
@@ -492,6 +473,37 @@ namespace Wexflow.Core
         }
 
         /// <summary>
+        /// Get workflow id from xml 
+        /// </summary>
+        /// <param name="xml"></param>
+        /// <returns></returns>
+        public int GetWorkflowId(string xml)
+        {
+            try
+            {
+                using (var xmlReader = XmlReader.Create(new StringReader(xml)))
+                {
+                    XmlNamespaceManager xmlNamespaceManager = null;
+                    var xmlNameTable = xmlReader.NameTable;
+                    if (xmlNameTable != null)
+                    {
+                        xmlNamespaceManager = new XmlNamespaceManager(xmlNameTable);
+                        xmlNamespaceManager.AddNamespace("wf", "urn:wexflow-schema");
+                    }
+
+                    var xdoc = XDocument.Parse(xml);
+                    var id = int.Parse(((xdoc.XPathSelectElement("/wf:Workflow", xmlNamespaceManager) ?? throw new InvalidOperationException()).Attribute("id") ?? throw new InvalidOperationException("id attribute of workflow not found")).Value);
+                    return id;
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.ErrorFormat("Error while retrieving workflow id: {0}", e.Message);
+                return -1;
+            }
+        }
+
+        /// <summary>
         /// Saves a workflow from its file
         /// </summary>
         /// <param name="userId">User Id</param>
@@ -499,12 +511,12 @@ namespace Wexflow.Core
         /// <param name="filePath">Workflow File Path</param>
         /// <param name="schedule">Indicates whether to schedule the workflow or not.</param>
         /// <returns>Workflow DB Id</returns>
-        public string SaveWorkflowFromFile(string userId, UserProfile userProfile, string filePath, bool schedule)
+        public async System.Threading.Tasks.Task<string> SaveWorkflowFromFile(string userId, UserProfile userProfile, string filePath, bool schedule)
         {
             try
             {
                 var xml = File.ReadAllText(filePath);
-                var id = SaveWorkflow(userId, userProfile, xml, schedule);
+                var id = await SaveWorkflow(userId, userProfile, xml, schedule);
                 var workflow = Workflows.First(w => w.DbId == id);
                 workflow.FilePath = filePath;
                 return id;
@@ -715,7 +727,7 @@ namespace Wexflow.Core
         /// <summary>
         /// Starts Wexflow engine.
         /// </summary>
-        public void Run()
+        public async System.Threading.Tasks.Task Run()
         {
             if (EnableWorkflowsHotFolder)
             {
@@ -733,12 +745,12 @@ namespace Wexflow.Core
 
             foreach (var workflow in Workflows)
             {
-                ScheduleWorkflow(workflow);
+                await ScheduleWorkflow(workflow);
             }
 
             if (!QuartzScheduler.IsStarted)
             {
-                QuartzScheduler.Start().Wait();
+                await QuartzScheduler.Start();
             }
 
             Logger.InfoFormat("Scheduling {0} workflows finished.", Workflows.Count);
@@ -766,7 +778,7 @@ namespace Wexflow.Core
             }
         }
 
-        private void ScheduleWorkflow(Workflow wf)
+        private async System.Threading.Tasks.Task ScheduleWorkflow(Workflow wf)
         {
             try
             {
@@ -798,7 +810,7 @@ namespace Wexflow.Core
                             .Build();
 
                         DeleteJob(wf);
-                        QuartzScheduler.ScheduleJob(jobDetail, trigger).Wait();
+                        await QuartzScheduler.ScheduleJob(jobDetail, trigger);
                     }
                     else if (wf.LaunchType == LaunchType.Cron)
                     {
@@ -822,7 +834,7 @@ namespace Wexflow.Core
                             .Build();
 
                         DeleteJob(wf);
-                        QuartzScheduler.ScheduleJob(jobDetail, trigger).Wait();
+                        await QuartzScheduler.ScheduleJob(jobDetail, trigger);
                     }
                 }
                 else
@@ -841,11 +853,11 @@ namespace Wexflow.Core
         /// </summary>
         /// <param name="stopQuartzScheduler">Tells if Quartz scheduler should be stopped or not.</param>
         /// <param name="clearStatusCountAndEntries">Indicates whether to clear statusCount and entries.</param>
-        public void Stop(bool stopQuartzScheduler, bool clearStatusCountAndEntries)
+        public async System.Threading.Tasks.Task Stop(bool stopQuartzScheduler, bool clearStatusCountAndEntries)
         {
             if (stopQuartzScheduler)
             {
-                QuartzScheduler.Shutdown().Wait();
+                await QuartzScheduler.Shutdown();
             }
 
             foreach (var workflow in Workflows)
@@ -888,8 +900,9 @@ namespace Wexflow.Core
         /// </summary>
         /// <param name="startedBy">Username of the user that started the workflow.</param>
         /// <param name="workflowId">Workflow Id.</param>
+        /// <param name="restVariables">Rest variables</param>
         /// <returns>Instance id.</returns>
-        public Guid StartWorkflow(string startedBy, int workflowId)
+        public async System.Threading.Tasks.Task<Guid> StartWorkflowAsync(string startedBy, int workflowId, List<Variable> restVariables = null)
         {
             var wf = GetWorkflow(workflowId);
 
@@ -901,7 +914,7 @@ namespace Wexflow.Core
             {
                 if (wf.IsEnabled)
                 {
-                    var instanceId = wf.StartAsync(startedBy);
+                    var instanceId = await wf.StartAsync(startedBy, restVariables);
                     return instanceId;
                 }
             }
@@ -1118,10 +1131,11 @@ namespace Wexflow.Core
         /// <param name="email">Email.</param>
         public void InsertUser(string username, string password, UserProfile userProfile, string email)
         {
+            var hashedPassword = Db.Db.HashPassword(password);
             Database.InsertUser(new User
             {
                 Username = username,
-                Password = password,
+                Password = hashedPassword,
                 UserProfile = userProfile,
                 Email = email
             });
@@ -1137,11 +1151,12 @@ namespace Wexflow.Core
         /// <param name="email">User's email.</param>
         public void UpdateUser(string userId, string username, string password, UserProfile userProfile, string email)
         {
+            var hashedPassword = Db.Db.HashPassword(password);
             var user = Database.GetUserById(userId);
             Database.UpdateUser(userId, new User
             {
                 Username = username,
-                Password = password,
+                Password = hashedPassword,
                 UserProfile = userProfile,
                 Email = email,
                 CreatedOn = user.CreatedOn
@@ -1253,6 +1268,29 @@ namespace Wexflow.Core
         {
             var col = Database.GetEntries(keyword, from, to, page, entriesCount, heo);
             return col.ToArray();
+        }
+
+        /// <summary>
+        /// Returns latest workflow entry.
+        /// </summary>
+        /// <param name="workflowId">Workflow Id.</param>
+        /// <returns></returns>
+        public Entry GetEntry(int workflowId)
+        {
+            var col = Database.GetEntry(workflowId);
+            return col;
+        }
+
+        /// <summary>
+        /// Returns a workflow job entry.
+        /// </summary>
+        /// <param name="workflowId">Workflow Id.</param>
+        /// <param name="jobId">Job Id.</param>
+        /// <returns></returns>
+        public Entry GetEntry(int workflowId, Guid jobId)
+        {
+            var col = Database.GetEntry(workflowId, jobId);
+            return col;
         }
 
         /// <summary>

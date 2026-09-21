@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("Wexflow.Tests")]
-[assembly: AssemblyCopyright("Copyright © Akram El Assas 2017-2023")]
+[assembly: AssemblyCopyright("Copyright © Akram El Assas 2017-2025")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -14,5 +14,5 @@ using System.Runtime.InteropServices;
 
 [assembly: Guid("2f1ec7ce-a0ec-4f63-976c-83e75cdb725e")]
 
-[assembly: AssemblyVersion("7.9.0.0")]
-[assembly: AssemblyFileVersion("7.9.0.0")]
+[assembly: AssemblyVersion("10.2.0.0")]
+[assembly: AssemblyFileVersion("10.2.0.0")]

@@ -1,4 +1,5 @@
-﻿using MySqlConnector;
+﻿using Microsoft.Data.SqlClient;
+using MySqlConnector;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
 using System;
@@ -6,10 +7,8 @@ using System.Collections.Generic;
 using System.Data.Common;
 using System.Data.Odbc;
 using System.Data.OleDb;
-using System.Data.SqlClient;
 using System.Data.SQLite;
 using System.IO;
-using System.Threading;
 using System.Xml.Linq;
 using Teradata.Client.Provider;
 using Wexflow.Core;
@@ -43,7 +42,7 @@ namespace Wexflow.Tasks.SqlToCsv
         public SqlToCsv(XElement xe, Workflow wf)
             : base(xe, wf)
         {
-            DbType = (Type)Enum.Parse(typeof(Type), GetSetting("type"), true);
+            DbType = Enum.Parse<Type>(GetSetting("type"), true);
             ConnectionString = GetSetting("connectionString");
             SqlScript = GetSetting("sql", string.Empty);
             QuoteString = GetSetting("quote", string.Empty);
@@ -64,6 +63,7 @@ namespace Wexflow.Tasks.SqlToCsv
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Executing SQL scripts...");
 
             var success = true;
@@ -78,7 +78,7 @@ namespace Wexflow.Tasks.SqlToCsv
                     Info("The script has been executed through the sql option of the task.");
                 }
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }
@@ -89,7 +89,10 @@ namespace Wexflow.Tasks.SqlToCsv
             }
             finally
             {
-                WaitOne();
+                if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                {
+                    WaitOne();
+                }
             }
 
             // Execute SQL files scripts
@@ -97,6 +100,7 @@ namespace Wexflow.Tasks.SqlToCsv
             {
                 try
                 {
+                    Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                     var sql = File.ReadAllText(file.Path);
                     ExecuteSql(sql);
                     InfoFormat("The script {0} has been executed.", file.Path);
@@ -106,7 +110,7 @@ namespace Wexflow.Tasks.SqlToCsv
                         atLeastOneSucceed = true;
                     }
                 }
-                catch (ThreadInterruptedException)
+                catch (OperationCanceledException)
                 {
                     throw;
                 }
@@ -117,7 +121,10 @@ namespace Wexflow.Tasks.SqlToCsv
                 }
                 finally
                 {
-                    WaitOne();
+                    if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        WaitOne();
+                    }
                 }
             }
 
@@ -149,13 +156,13 @@ namespace Wexflow.Tasks.SqlToCsv
                     break;
                 case Type.Access:
 
-#pragma warning disable CA1416 // Valider la compatibilité de la plateforme
+#pragma warning disable CA1416
                     using (OleDbConnection connection = new(ConnectionString))
                     using (OleDbCommand command = new(sql, connection))
                     {
                         ConvertToCsv(connection, command);
                     }
-#pragma warning restore CA1416 // Valider la compatibilité de la plateforme
+#pragma warning restore CA1416
 
                     break;
                 case Type.Oracle:
@@ -200,6 +207,8 @@ namespace Wexflow.Tasks.SqlToCsv
                         ConvertToCsv(connection, command);
                     }
                     break;
+                default:
+                    break;
             }
         }
 
@@ -216,8 +225,8 @@ namespace Wexflow.Tasks.SqlToCsv
 
                 while (hasRows)
                 {
-                    List<string> columns = new();
-                    List<string> values = new();
+                    List<string> columns = [];
+                    List<string> values = [];
                     var readColumns = false;
                     var headerDone = false;
                     var readRecord = false;

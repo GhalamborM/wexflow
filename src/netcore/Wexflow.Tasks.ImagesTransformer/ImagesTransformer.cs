@@ -1,6 +1,5 @@
-﻿using System;
-using System.Drawing;
-using System.Drawing.Imaging;
+﻿using SkiaSharp;
+using System;
 using System.IO;
 using System.Runtime.Versioning;
 using System.Threading;
@@ -12,14 +11,14 @@ namespace Wexflow.Tasks.ImagesTransformer
     public enum ImgFormat
     {
         Bmp,
-        Emf,
-        Exif,
+        //Emf,
+        //Exif,
         Gif,
         Icon,
         Jpeg,
         Png,
-        Tiff,
-        Wmf
+        //Tiff,
+        //Wmf
     }
 
     [SupportedOSPlatform("windows")]
@@ -32,11 +31,12 @@ namespace Wexflow.Tasks.ImagesTransformer
             : base(xe, wf)
         {
             OutputFilePattern = GetSetting("outputFilePattern");
-            OutputFormat = (ImgFormat)Enum.Parse(typeof(ImgFormat), GetSetting("outputFormat"), true);
+            OutputFormat = Enum.Parse<ImgFormat>(GetSetting("outputFormat"), true);
         }
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Transforming images...");
 
             var success = true;
@@ -46,39 +46,42 @@ namespace Wexflow.Tasks.ImagesTransformer
             {
                 try
                 {
+                    Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                     var destFilePath = Path.Combine(Workflow.WorkflowTempFolder,
                         OutputFilePattern.Replace("$fileNameWithoutExtension", Path.GetFileNameWithoutExtension(file.FileName)).Replace("$fileName", file.FileName));
 
-                    using (var img = Image.FromFile(file.Path))
+                    using var skBitmap = SKBitmap.Decode(file.Path);
                     {
                         switch (OutputFormat)
                         {
                             case ImgFormat.Bmp:
-                                img.Save(destFilePath, ImageFormat.Bmp);
+                                SaveImage(skBitmap, SKEncodedImageFormat.Bmp, destFilePath);
                                 break;
-                            case ImgFormat.Emf:
-                                img.Save(destFilePath, ImageFormat.Emf);
-                                break;
-                            case ImgFormat.Exif:
-                                img.Save(destFilePath, ImageFormat.Exif);
-                                break;
+                            //case ImgFormat.Emf:
+                            //    img.Save(destFilePath, ImageFormat.Emf);
+                            //    break;
+                            //case ImgFormat.Exif:
+                            //    img.Save(destFilePath, ImageFormat.Exif);
+                            //    break;
                             case ImgFormat.Gif:
-                                img.Save(destFilePath, ImageFormat.Gif);
+                                SaveImage(skBitmap, SKEncodedImageFormat.Gif, destFilePath);
                                 break;
                             case ImgFormat.Icon:
-                                img.Save(destFilePath, ImageFormat.Icon);
+                                SaveImage(skBitmap, SKEncodedImageFormat.Ico, destFilePath);
                                 break;
                             case ImgFormat.Jpeg:
-                                img.Save(destFilePath, ImageFormat.Jpeg);
+                                SaveImage(skBitmap, SKEncodedImageFormat.Jpeg, destFilePath);
                                 break;
                             case ImgFormat.Png:
-                                img.Save(destFilePath, ImageFormat.Png);
+                                SaveImage(skBitmap, SKEncodedImageFormat.Png, destFilePath);
                                 break;
-                            case ImgFormat.Tiff:
-                                img.Save(destFilePath, ImageFormat.Tiff);
-                                break;
-                            case ImgFormat.Wmf:
-                                img.Save(destFilePath, ImageFormat.Wmf);
+                            //case ImgFormat.Tiff:
+                            //    img.Save(destFilePath, ImageFormat.Tiff);
+                            //    break;
+                            //case ImgFormat.Wmf:
+                            //    SaveImage(skBitmap, SKEncodedImageFormat.Jpeg, destFilePath);
+                            //    break;
+                            default:
                                 break;
                         }
                     }
@@ -90,7 +93,7 @@ namespace Wexflow.Tasks.ImagesTransformer
                         atLeastOneSucceed = true;
                     }
                 }
-                catch (ThreadInterruptedException)
+                catch (OperationCanceledException)
                 {
                     throw;
                 }
@@ -101,7 +104,10 @@ namespace Wexflow.Tasks.ImagesTransformer
                 }
                 finally
                 {
-                    WaitOne();
+                    if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        WaitOne();
+                    }
                 }
             }
 
@@ -118,6 +124,12 @@ namespace Wexflow.Tasks.ImagesTransformer
 
             Info("Task finished.");
             return new TaskStatus(status, false);
+        }
+
+        private static void SaveImage(SKBitmap skBitmap, SKEncodedImageFormat sKEncodedImageFormat, string destFilePath)
+        {
+            using var data = skBitmap.Encode(sKEncodedImageFormat, 80);
+            File.WriteAllBytes(destFilePath, data.ToArray());
         }
     }
 }

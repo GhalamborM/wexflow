@@ -1,9 +1,8 @@
-﻿using System;
+﻿using SkiaSharp;
+using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.IO;
 using System.Runtime.Versioning;
-using System.Threading;
 using System.Xml.Linq;
 using Wexflow.Core;
 
@@ -19,6 +18,7 @@ namespace Wexflow.Tasks.ImagesConcat
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();          
             Info("Concatenating images...");
             var status = Status.Success;
 
@@ -29,7 +29,6 @@ namespace Wexflow.Tasks.ImagesConcat
                 if (imageFiles.Length >= 2)
                 {
                     var extension = Path.GetExtension(imageFiles[0].FileName);
-
                     var destPath = Path.Combine(Workflow.WorkflowTempFolder,
                         $"ImagesConcat_{DateTime.Now:yyyy-MM-dd-HH-mm-ss-fff}{extension}");
 
@@ -44,7 +43,7 @@ namespace Wexflow.Tasks.ImagesConcat
                     Error("You must provide at least two images to concatenate them.");
                 }
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }
@@ -62,12 +61,12 @@ namespace Wexflow.Tasks.ImagesConcat
         {
             try
             {
-                List<int> imageHeights = new();
+                List<int> imageHeights = [];
                 var nIndex = 0;
                 var width = 0;
                 foreach (var imageFile in imageFiles)
                 {
-                    using var img = Image.FromFile(imageFile.Path);
+                    var img = SKImage.FromEncodedData(imageFile.Path);
                     imageHeights.Add(img.Height);
                     width += img.Width;
                 }
@@ -75,28 +74,37 @@ namespace Wexflow.Tasks.ImagesConcat
 
                 var height = imageHeights[^1];
 
-                using (Bitmap finalImage = new(width, height))
-                using (var graphics = Graphics.FromImage(finalImage))
+                var imageInfo = new SKImageInfo(width, height);
+                using (var surface = SKSurface.Create(imageInfo))
                 {
-                    graphics.Clear(SystemColors.AppWorkspace);
+                    var canvas = surface.Canvas;
+
                     foreach (var imageFile in imageFiles)
                     {
-                        using var img = Image.FromFile(imageFile.Path);
+                        Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
+                        var image = SKImage.FromEncodedData(imageFile.Path);
+                        var bitmap = SKBitmap.FromImage(image);
                         if (nIndex == 0)
                         {
-                            graphics.DrawImage(img, new Point(0, 0));
+                            canvas.DrawBitmap(bitmap, new SKPoint(0, 0));
                             nIndex++;
-                            width = img.Width;
+                            width = image.Width;
                         }
                         else
                         {
-                            graphics.DrawImage(img, new Point(width, 0));
-                            width += img.Width;
+                            canvas.DrawBitmap(bitmap, new SKPoint(width, 0));
+                            width += image.Width;
                         }
-                        WaitOne();
+                        if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                        {
+                            WaitOne();
+                        }
+                        nIndex++;
                     }
 
-                    finalImage.Save(destPath);
+                    using var img = surface.Snapshot();
+                    using var data = img.Encode();
+                    File.WriteAllBytes(destPath, data.ToArray());
                 }
 
                 InfoFormat("Image concatenation succeeded: {0}", destPath);
@@ -104,7 +112,7 @@ namespace Wexflow.Tasks.ImagesConcat
 
                 return true;
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }

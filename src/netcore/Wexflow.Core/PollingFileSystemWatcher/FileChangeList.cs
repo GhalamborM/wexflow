@@ -57,7 +57,7 @@ namespace Wexflow.Core.PollingFileSystemWatcher
             Array.Sort(_changes, 0, _count, Comparer.ColumnDefault);
         }
 
-        public readonly override string ToString()
+        public override readonly string ToString()
         {
             return _count.ToString();
         }
@@ -70,7 +70,7 @@ namespace Wexflow.Core.PollingFileSystemWatcher
             return result;
         }
 
-        private class Comparer : IComparer<FileChange>
+        private sealed class Comparer : IComparer<FileChange>
         {
             public static readonly IComparer<FileChange> ColumnDefault = new Comparer();
 

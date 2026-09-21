@@ -37,7 +37,7 @@ namespace Wexflow.Tasks.Ftp
             var user = GetSetting("user");
             var password = GetSetting("password");
             var path = GetSetting("path");
-            var protocol = (Protocol)Enum.Parse(typeof(Protocol), GetSetting("protocol"), true);
+            var protocol = Enum.Parse<Protocol>(GetSetting("protocol"), true);
             var debugLogs = bool.Parse(GetSetting("debugLogs", "false"));
             switch (protocol)
             {
@@ -45,7 +45,7 @@ namespace Wexflow.Tasks.Ftp
                     _plugin = new PluginFtp(this, server, port, user, password, path, debugLogs);
                     break;
                 case Protocol.Ftps:
-                    var encryptionMode = (EncryptionMode)Enum.Parse(typeof(EncryptionMode), GetSetting("encryption"), true);
+                    var encryptionMode = (EncryptionMode)Enum.Parse(typeof(EncryptionMode), GetSetting("encryption", "explicit"), true);
                     _plugin = new PluginFtps(this, server, port, user, password, path, encryptionMode, debugLogs);
                     break;
                 case Protocol.Sftp:
@@ -53,8 +53,10 @@ namespace Wexflow.Tasks.Ftp
                     var passphrase = GetSetting("passphrase", string.Empty);
                     _plugin = new PluginSftp(this, server, port, user, password, path, privateKeyPath, passphrase);
                     break;
+                default:
+                    break;
             }
-            _cmd = (FtpCommad)Enum.Parse(typeof(FtpCommad), GetSetting("command"), true);
+            _cmd = Enum.Parse<FtpCommad>(GetSetting("command"), true);
             _retryCount = int.Parse(GetSetting("retryCount", "3"));
             _retryTimeout = int.Parse(GetSetting("retryTimeout", "1500"));
             SmbComputerName = GetSetting("smbComputerName");
@@ -65,6 +67,7 @@ namespace Wexflow.Tasks.Ftp
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Processing files...");
             var atLeastOneSuccess = false;
 
@@ -73,7 +76,7 @@ namespace Wexflow.Tasks.Ftp
             {
                 success = DoWork(ref atLeastOneSuccess);
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }
@@ -108,6 +111,7 @@ namespace Wexflow.Tasks.Ftp
                 {
                     try
                     {
+                        Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                         var files = _plugin.List();
                         Files.AddRange(files);
                         if (!atLeastOneSuccess)
@@ -117,7 +121,7 @@ namespace Wexflow.Tasks.Ftp
 
                         break;
                     }
-                    catch (ThreadInterruptedException)
+                    catch (OperationCanceledException)
                     {
                         throw;
                     }
@@ -138,7 +142,10 @@ namespace Wexflow.Tasks.Ftp
                     }
                     finally
                     {
-                        WaitOne();
+                        if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                        {
+                            WaitOne();
+                        }
                     }
                 }
             }
@@ -154,6 +161,7 @@ namespace Wexflow.Tasks.Ftp
                     {
                         try
                         {
+                            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                             switch (_cmd)
                             {
                                 case FtpCommad.Upload:
@@ -166,6 +174,9 @@ namespace Wexflow.Tasks.Ftp
                                     _plugin.Delete(file);
                                     _ = Workflow.FilesPerTask[file.TaskId].Remove(file);
                                     break;
+                                case FtpCommad.List:
+                                default:
+                                    break;
                             }
 
                             if (!atLeastOneSuccess)
@@ -175,7 +186,7 @@ namespace Wexflow.Tasks.Ftp
 
                             break;
                         }
-                        catch (ThreadInterruptedException)
+                        catch (OperationCanceledException)
                         {
                             throw;
                         }
@@ -196,7 +207,10 @@ namespace Wexflow.Tasks.Ftp
                         }
                         finally
                         {
-                            WaitOne();
+                            if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                            {
+                                WaitOne();
+                            }
                         }
                     }
                 }

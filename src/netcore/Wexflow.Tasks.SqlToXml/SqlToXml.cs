@@ -1,4 +1,5 @@
-﻿using MySqlConnector;
+﻿using Microsoft.Data.SqlClient;
+using MySqlConnector;
 using Npgsql;
 using Oracle.ManagedDataAccess.Client;
 using System;
@@ -6,13 +7,11 @@ using System.Collections.Generic;
 using System.Data.Common;
 using System.Data.Odbc;
 using System.Data.OleDb;
-using System.Data.SqlClient;
 using System.Data.SQLite;
 using System.Data.SqlTypes;
 using System.IO;
 using System.Security;
 using System.Text.RegularExpressions;
-using System.Threading;
 using System.Xml.Linq;
 using Teradata.Client.Provider;
 using Wexflow.Core;
@@ -41,7 +40,7 @@ namespace Wexflow.Tasks.SqlToXml
         public SqlToXml(XElement xe, Workflow wf)
             : base(xe, wf)
         {
-            DbType = (Type)Enum.Parse(typeof(Type), GetSetting("type"), true);
+            DbType = Enum.Parse<Type>(GetSetting("type"), true);
             ConnectionString = GetSetting("connectionString");
             SqlScript = GetSetting("sql", string.Empty);
             ExcludeEmptyValues = bool.Parse(GetSetting("excludeEmptyValues", "false"));
@@ -49,6 +48,7 @@ namespace Wexflow.Tasks.SqlToXml
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Executing SQL scripts...");
 
             var success = true;
@@ -63,7 +63,7 @@ namespace Wexflow.Tasks.SqlToXml
                     Info("The script has been executed through the sql option of the task.");
                 }
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }
@@ -74,7 +74,10 @@ namespace Wexflow.Tasks.SqlToXml
             }
             finally
             {
-                WaitOne();
+                if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                {
+                    WaitOne();
+                }
             }
 
             // Execute SQL files scripts
@@ -82,6 +85,7 @@ namespace Wexflow.Tasks.SqlToXml
             {
                 try
                 {
+                    Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                     var sql = File.ReadAllText(file.Path);
                     ExecuteSql(sql);
                     InfoFormat("The script {0} has been executed.", file.Path);
@@ -91,7 +95,7 @@ namespace Wexflow.Tasks.SqlToXml
                         atLeastOneSucceed = true;
                     }
                 }
-                catch (ThreadInterruptedException)
+                catch (OperationCanceledException)
                 {
                     throw;
                 }
@@ -102,7 +106,10 @@ namespace Wexflow.Tasks.SqlToXml
                 }
                 finally
                 {
-                    WaitOne();
+                    if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        WaitOne();
+                    }
                 }
             }
 
@@ -133,13 +140,13 @@ namespace Wexflow.Tasks.SqlToXml
                     }
                     break;
                 case Type.Access:
-#pragma warning disable CA1416 // Valider la compatibilité de la plateforme
+#pragma warning disable CA1416
                     using (OleDbConnection conn = new(ConnectionString))
                     using (OleDbCommand comm = new(sql, conn))
                     {
                         ConvertToXml(conn, comm);
                     }
-#pragma warning restore CA1416 // Valider la compatibilité de la plateforme
+#pragma warning restore CA1416
                     break;
                 case Type.Oracle:
                     using (OracleConnection connection = new(ConnectionString))
@@ -183,6 +190,8 @@ namespace Wexflow.Tasks.SqlToXml
                         ConvertToXml(connenction, command);
                     }
                     break;
+                default:
+                    break;
             }
         }
 
@@ -193,7 +202,7 @@ namespace Wexflow.Tasks.SqlToXml
 
             if (reader.HasRows)
             {
-                List<string> columns = new();
+                List<string> columns = [];
 
                 for (var i = 0; i < reader.FieldCount; i++)
                 {

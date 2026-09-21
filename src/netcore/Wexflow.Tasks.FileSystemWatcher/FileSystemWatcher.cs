@@ -22,6 +22,8 @@ namespace Wexflow.Tasks.FileSystemWatcher
         public static bool SafeMode { get; private set; }
         public static List<string> CurrentLogs { get; private set; }
 
+        private static readonly char[] separator = [','];
+
         public FileSystemWatcher(XElement xe, Workflow wf) : base(xe, wf)
         {
             FolderToWatch = GetSetting("folderToWatch");
@@ -32,11 +34,12 @@ namespace Wexflow.Tasks.FileSystemWatcher
             OnFileChanged = GetSetting("onFileChanged");
             OnFileDeleted = GetSetting("onFileDeleted");
             SafeMode = bool.Parse(GetSetting("safeMode", "true"));
-            CurrentLogs = new List<string>();
+            CurrentLogs = [];
         }
 
-        public override TaskStatus Run()
+        public async override System.Threading.Tasks.Task<TaskStatus> RunAsync()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             InfoFormat("Watching the folder {0} ...", FolderToWatch);
 
             try
@@ -55,12 +58,13 @@ namespace Wexflow.Tasks.FileSystemWatcher
                     InfoFormat("FileSystemWatcher.OnFound started for {0}", file);
                     try
                     {
+                        Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                         if (SafeMode && WexflowEngine.IsFileLocked(file))
                         {
                             Info($"File lock detected on file {file}");
                             while (WexflowEngine.IsFileLocked(file))
                             {
-                                Thread.Sleep(1000);
+                                await System.Threading.Tasks.Task.Delay(1000, Workflow.CancellationTokenSource.Token);
                             }
                         }
                         ClearFiles();
@@ -74,6 +78,11 @@ namespace Wexflow.Tasks.FileSystemWatcher
                         }
                         _ = Files.RemoveAll(f => f.Path == file);
                     }
+                    catch (OperationCanceledException)
+                    {
+                        // Required for proper stop handling (do not swallow this exception)
+                        throw;
+                    }
                     catch (IOException ex) when ((ex.HResult & 0x0000FFFF) == 32)
                     {
                         Logger.InfoFormat("There is a sharing violation for the file {0}.", file);
@@ -85,7 +94,10 @@ namespace Wexflow.Tasks.FileSystemWatcher
                     finally
                     {
                         Info("FileSystemWatcher.OnFound finished.");
-                        WaitOne();
+                        if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                        {
+                            WaitOne();
+                        }
                     }
                     try
                     {
@@ -114,11 +126,17 @@ namespace Wexflow.Tasks.FileSystemWatcher
 
                 Info("Begin watching ...");
                 CurrentLogs.AddRange(Logs);
-                while (!IsStopped)
+                try
                 {
-                    Thread.Sleep(1);
+                    while (!IsStopped)
+                    {
+                        await System.Threading.Tasks.Task.Delay(100, Workflow.CancellationTokenSource.Token);
+                    }
                 }
-                Watcher.Dispose();
+                finally
+                {
+                    Watcher.Dispose();
+                }
             }
             catch (Exception e)
             {
@@ -262,6 +280,10 @@ namespace Wexflow.Tasks.FileSystemWatcher
                             ErrorFormat("An error while updating PollingFileSystemWatcher.OnDeleted database entry.", ex);
                         }
                         break;
+                    case WatcherChangeTypes.Renamed:
+                    case WatcherChangeTypes.All:
+                    default:
+                        break;
                 }
             }
         }
@@ -275,11 +297,11 @@ namespace Wexflow.Tasks.FileSystemWatcher
 
         private Task[] GetTasks(string evt)
         {
-            List<Task> tasks = new();
+            List<Task> tasks = [];
 
             if (!string.IsNullOrEmpty(evt))
             {
-                var ids = evt.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                var ids = evt.Split(separator, StringSplitOptions.RemoveEmptyEntries);
                 foreach (var id in ids)
                 {
                     var taskId = int.Parse(id.Trim());
@@ -288,7 +310,7 @@ namespace Wexflow.Tasks.FileSystemWatcher
                 }
             }
 
-            return tasks.ToArray();
+            return [.. tasks];
         }
 
         private void ClearFiles()

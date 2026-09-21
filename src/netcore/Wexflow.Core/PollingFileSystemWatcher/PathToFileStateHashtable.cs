@@ -13,21 +13,11 @@ namespace Wexflow.Core.PollingFileSystemWatcher
     // It has optimized Equals and GetHasCode
     // It implements removals by marking values as "removed" (Path==null) and then garbage collecting them when table is resized
     [Serializable]
-    internal class PathToFileStateHashtable
+    internal sealed class PathToFileStateHashtable(int capacity = 4)
     {
         private int _nextValuesIndex = 1; // the first Values slot is reserved so that default(Bucket) knows that it is not pointing to any value.
-        public FileState[] Values { get; private set; }
-        private Bucket[] _buckets;
-
-        public PathToFileStateHashtable(int capacity = 4)
-        {
-            Values = new FileState[capacity];
-
-            // +1 is needed so that there are always more buckets than values.
-            // this is so that unsuccesful search always terminates (as it terminates at an empty bucket)
-            // note that today the "+1" is not strictly required, as one Values slot is reserved, but I am future proofing here
-            _buckets = new Bucket[GetPrime(capacity + 1)];
-        }
+        public FileState[] Values { get; private set; } = new FileState[capacity];
+        private Bucket[] _buckets = new Bucket[GetPrime(capacity + 1)];
 
         public int Count { get; private set; }
 
@@ -98,14 +88,12 @@ namespace Wexflow.Core.PollingFileSystemWatcher
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        // ReSharper disable once RedundantUnsafeContext
         private static unsafe bool Equal(FullPath fullPath, string directory, ReadOnlySpan<char> file)
         {
             return string.Equals(fullPath.Directory, directory, StringComparison.Ordinal)
 && file.Equals((ReadOnlySpan<char>)fullPath.File, StringComparison.Ordinal);
         }
 
-        // ReSharper disable once RedundantUnsafeContext
         private static unsafe int GetHashCode(ReadOnlySpan<char> path)
         {
             var code = 0;
@@ -151,12 +139,12 @@ namespace Wexflow.Core.PollingFileSystemWatcher
             Count = bigger.Count;
         }
 
-        private static readonly int[] Primes = {
+        private static readonly int[] Primes = [
             3, 7, 11, 17, 23, 29, 37, 47, 59, 71, 89, 107, 131, 163, 197, 239, 293, 353, 431, 521, 631, 761, 919,
             1103, 1327, 1597, 1931, 2333, 2801, 3371, 4049, 4861, 5839, 7013, 8419, 10103, 12143, 14591,
             17519, 21023, 25229, 30293, 36353, 43627, 52361, 62851, 75431, 90523, 108631, 130363, 156437,
             187751, 225307, 270371, 324449, 389357, 467237, 560689, 672827, 807403, 968897, 1162687, 1395263,
-            1674319, 2009191, 2411033, 2893249, 3471899, 4166287, 4999559, 5999471, 7199369};
+            1674319, 2009191, 2411033, 2893249, 3471899, 4166287, 4999559, 5999471, 7199369];
 
         private static bool IsPrime(int candidate)
         {
@@ -177,7 +165,6 @@ namespace Wexflow.Core.PollingFileSystemWatcher
 
         private static int GetPrime(int min)
         {
-            // ReSharper disable once ForCanBeConvertedToForeach
             for (var i = 0; i < Primes.Length; i++)
             {
                 var prime = Primes[i];
@@ -204,16 +191,10 @@ namespace Wexflow.Core.PollingFileSystemWatcher
             return new Enumerator(this);
         }
 
-        public struct Enumerator
+        public struct Enumerator(PathToFileStateHashtable table)
         {
-            private readonly PathToFileStateHashtable _table;
-            private int _index;
-
-            public Enumerator(PathToFileStateHashtable table)
-            {
-                _table = table;
-                _index = 0;
-            }
+            private readonly PathToFileStateHashtable _table = table;
+            private int _index = 0;
 
             public bool MoveNext()
             {
@@ -249,7 +230,7 @@ namespace Wexflow.Core.PollingFileSystemWatcher
             }
             public readonly bool IsEmpty => ValuesIndex == 0;
 
-            public readonly override string ToString()
+            public override readonly string ToString()
             {
                 return IsEmpty ? "empty" : Key.ToString();
             }
@@ -261,7 +242,7 @@ namespace Wexflow.Core.PollingFileSystemWatcher
             public string Directory;
             public string File;
 
-            public readonly override string ToString()
+            public override readonly string ToString()
             {
                 return File;
             }

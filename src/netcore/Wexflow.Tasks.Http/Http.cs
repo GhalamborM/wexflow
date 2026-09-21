@@ -23,18 +23,17 @@ namespace Wexflow.Tasks.Http
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Downloading files...");
 
             var success = true;
             var atLeastOneSucceed = false;
 
-            ServicePointManager.Expect100Continue = true;
-            ServicePointManager.SecurityProtocol = TLS12;
-
             foreach (var url in Urls)
             {
                 try
                 {
+                    Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                     var fileName = Path.GetFileName(url) ?? throw new Exception("File name is null");
                     var destPath = Path.Combine(Workflow.WorkflowTempFolder, fileName);
 
@@ -48,7 +47,7 @@ namespace Wexflow.Tasks.Http
                         atLeastOneSucceed = true;
                     }
                 }
-                catch (ThreadInterruptedException)
+                catch (OperationCanceledException)
                 {
                     throw;
                 }
@@ -59,7 +58,10 @@ namespace Wexflow.Tasks.Http
                 }
                 finally
                 {
-                    WaitOne();
+                    if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        WaitOne();
+                    }
                 }
             }
 
@@ -80,7 +82,12 @@ namespace Wexflow.Tasks.Http
 
         private static async System.Threading.Tasks.Task DownloadFile(string url, string path)
         {
-            using HttpClient client = new();
+            var handler = new HttpClientHandler
+            {
+                SslProtocols = SslProtocols.Tls12,
+                AllowAutoRedirect = true
+            };
+            using HttpClient client = new(handler);
             var response = await client.GetAsync(url);
             await using FileStream fs = new(path, FileMode.CreateNew);
             await response.Content.CopyToAsync(fs);

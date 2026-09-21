@@ -32,6 +32,7 @@ namespace Wexflow.Tasks.MailsSender
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Sending mails...");
 
             var success = true;
@@ -49,12 +50,13 @@ namespace Wexflow.Tasks.MailsSender
                     var count = 1;
                     foreach (var xMail in xMails)
                     {
+                        Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                         Mail mail;
                         try
                         {
                             mail = Mail.Parse(this, xMail, attachments);
                         }
-                        catch (ThreadInterruptedException)
+                        catch (OperationCanceledException)
                         {
                             throw;
                         }
@@ -77,7 +79,7 @@ namespace Wexflow.Tasks.MailsSender
                                 atLeastOneSucceed = true;
                             }
                         }
-                        catch (ThreadInterruptedException)
+                        catch (OperationCanceledException)
                         {
                             throw;
                         }
@@ -88,12 +90,15 @@ namespace Wexflow.Tasks.MailsSender
                         }
                         finally
                         {
-                            WaitOne();
+                            if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                            {
+                                WaitOne();
+                            }
                         }
                     }
                 }
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }
@@ -174,7 +179,7 @@ namespace Wexflow.Tasks.MailsSender
 
         public FileInf[] SelectAttachments()
         {
-            List<FileInf> files = new();
+            List<FileInf> files = [];
             foreach (var xSelectFile in GetXSettings("selectAttachments"))
             {
                 var xTaskId = xSelectFile.Attribute("value");
@@ -195,7 +200,7 @@ namespace Wexflow.Tasks.MailsSender
                     files.AddRange(qf);
                 }
             }
-            return files.ToArray();
+            return [.. files];
         }
     }
 }

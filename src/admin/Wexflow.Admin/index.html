@@ -1,0 +1,75 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Wexflow</title>
+    <link rel="icon" href="images/logo.png" type="image/png">
+
+    <link rel="stylesheet" type="text/css" href="css/bootstrap.min.css" />
+    <link rel="stylesheet" type="text/css" href="css/jquery.toast.min.css" />
+    <link rel="stylesheet" type="text/css" href="css/globals.css" />
+    <link rel="stylesheet" type="text/css" href="css/login.css" />
+
+    <script type="text/javascript" src="js/settings.js"></script>
+    <script type="text/javascript" src="js/lang/language.js"></script>
+
+    <script type="text/javascript" src="js/libs/jquery.min.js"></script>
+    <script type="text/javascript" src="js/libs/jquery.toast.min.js"></script>
+    <script type="text/javascript" src="js/libs/bootstrap.min.js"></script>
+    <script type="text/javascript" src="js/utils/common.js"></script>
+    <script type="text/javascript" src="js/utils/authenticate.js"></script>
+    <script type="text/javascript" src="js/lang/language.core.js"></script>
+    <script type="text/javascript" src="js/login.js"></script>
+    <script type="text/javascript" src="js/github-button.js"></script>
+</head>
+<body>
+    <div id="header">
+        <div id="github-btn"><a class="github-button" href="https://github.com/aelassas/wexflow" data-color-scheme="no-preference: light; light: light; dark: dark;" data-show-count="true" aria-label="Star aelassas/wexflow on GitHub">Star</a></div>
+        <div id="lang" class="header-right"></div>
+        <a id="about" href="https://wexflow.github.io" class="header-right">About</a>
+        <a id="help" href="https://github.com/aelassas/Wexflow/wiki" class="header-right">Help</a>
+    </div>
+    <div id="login">
+        <table>
+            <tr>
+                <td>
+                    <label id="lbl-username">Username</label>
+                </td>
+                <td>
+                    <input type="text" name="username" id="txt-username" autocomplete="off" />
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <label id="lbl-password">Password</label>
+                </td>
+                <td>
+                    <input type="password" name="password" id="txt-password" />
+                </td>
+            </tr>
+            <tr>
+                <td colspan="2">
+                    <div id="stay-connected">
+                        <input type="checkbox" name="stay-connected" id="chk-stay-connected" />
+                        <label id="lbl-stay-connected" for="chk-stay-connected">Stay Connected</label>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td colspan="2">
+                    <div id="login-action">
+                        <a id="forgot-password" href="forgot-password.html">Forgot Password?</a>
+                        <input id="btn-login" type="submit" name="sub" value="Sign in" class="btn btn-primary btn-xs" />
+                    </div>
+                </td>
+            </tr>
+        </table>
+    </div>
+    <script type="text/javascript">
+        window.onload = function () {
+            new window.Login();
+        }
+    </script>
+</body>
+</html>

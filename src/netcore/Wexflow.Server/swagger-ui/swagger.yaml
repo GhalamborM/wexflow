@@ -1,19 +1,18 @@
-﻿openapi: 3.0.1
+openapi: 3.0.1
 info:
   title: Swagger Wexflow
   description: Wexflow API.
-  contact:
-    email: akram.elassas@gmail.com
   license:
     name: MIT
     url: https://github.com/aelassas/wexflow/wiki/License
-  version: 7.9
+  version: 10.2
 externalDocs:
   description: Find out more about Wexflow
   url: https://wexflow.github.io
 servers:
 - url: //localhost:8000/api/v1
 tags:
+- name: Default
 - name: Dashboard
   description: Operations about dashboard
 - name: Records
@@ -31,6 +30,15 @@ tags:
 - name: Notifications
   description: Operations about notifications
 paths:
+  /hello:
+    get:
+      tags:
+      - Default
+      summary: Returns a JSON message confirming the service is running
+      responses:
+        200:
+          description: successful operation
+          content: {}
   /status-count:
     get:
       tags:
@@ -132,6 +140,26 @@ paths:
       - name: id
         in: query
         description: Entry id
+        schema:
+          type: string
+      responses:
+        200:
+          description: successful operation
+          content: {}
+  /entry:
+    get:
+      tags:
+      - Dashboard
+      summary: Returns job entry. If jobId is not specified, it returns the latest job entry of the workflow.
+      parameters:
+      - name: w
+        in: query
+        description: Workflow id
+        schema:
+          type: number
+      - name: i
+        in: query
+        description: Job instance id
         schema:
           type: string
       responses:
@@ -952,6 +980,26 @@ paths:
       - name: id
         in: query
         description: Entry id
+        schema:
+          type: string
+      responses:
+        200:
+          description: successful operation
+          content: {}
+  /verify-password:
+    post:
+      tags:
+      - Users
+      summary: Verifies user's password
+      parameters:
+      - name: username
+        in: query
+        description: Username
+        schema:
+          type: string
+      - name: p
+        in: query
+        description: Password
         schema:
           type: string
       responses:

@@ -12,8 +12,9 @@ namespace Wexflow.Tasks.Approval
         {
         }
 
-        public override TaskStatus Run()
+        public async override System.Threading.Tasks.Task<TaskStatus> RunAsync()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Approval process starting...");
 
             var status = Status.Success;
@@ -29,8 +30,12 @@ namespace Wexflow.Tasks.Approval
 
                     while (!File.Exists(trigger) && !Workflow.IsRejected && !IsStopped)
                     {
-                        Thread.Sleep(1000);
-                        WaitOne();
+                        Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
+                        await System.Threading.Tasks.Task.Delay(1000, Workflow.CancellationTokenSource.Token);
+                        if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                        {
+                            WaitOne();
+                        }
                     }
 
                     IsWaitingForApproval = false;
@@ -55,7 +60,7 @@ namespace Wexflow.Tasks.Approval
                     status = Status.Error;
                 }
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }

@@ -21,7 +21,7 @@ namespace Wexflow.Clients.Manager
         private const string ENABLED = "Enabled";
         private const string APPROVAL = "Approval";
         private const string WEXFLOW_SERVER_PATH = @"..\Wexflow.Server.exe.config";
-        private const string BACKEND = @"..\Backend\index.html";
+        //private const string WEXFLOW_SERVER_PATH = @"E:\dev\wexflow\src\src\net\Wexflow.Server\bin\Debug\Wexflow.Server.exe.config";
 
         private WexflowServiceClient _wexflowServiceClient;
         private WorkflowInfo[] _workflows;
@@ -33,6 +33,9 @@ namespace Wexflow.Clients.Manager
         private readonly string _logfile;
         private readonly ResourceManager _resources = new ResourceManager(typeof(Manager));
         private bool _serviceRestarted;
+
+        private bool _https = false;
+        private int _port = -1;
 
         public Manager()
         {
@@ -54,11 +57,21 @@ namespace Wexflow.Clients.Manager
                     {
                         _logfile = nodeList[0].Value;
                     }
+                    var httpsNode = root.SelectSingleNode("/configuration/appSettings/add[@key='HTTPS']/@value");
+                    if (httpsNode != null)
+                    {
+                        _https = bool.TryParse(httpsNode.Value, out var res) && res;
+                    }
+                    var portNode = root.SelectSingleNode("/configuration/appSettings/add[@key='WexflowServicePort']/@value");
+                    if (portNode != null)
+                    {
+                        _port = int.Parse(portNode.Value);
+                    }
                 }
             }
 
             buttonLogs.Enabled = !string.IsNullOrEmpty(_logfile);
-            buttonBackend.Enabled = File.Exists(BACKEND);
+            buttonBackend.Enabled = _port > -1;
             buttonRestart.Enabled = !Program.DebugMode;
 
             dataGridViewWorkflows.MouseWheel += MouseWheelEvt;
@@ -103,7 +116,7 @@ namespace Wexflow.Clients.Manager
                         _wexflowServiceClient = new WexflowServiceClient(WexflowWebServiceUri);
 
                         var keyword = textBoxSearch.Text.ToUpper();
-                        _workflows = _wexflowServiceClient.Search(keyword, Login.Username, Login.Password);
+                        _workflows = _wexflowServiceClient.Search(keyword, Login.Token);
                     }
                     catch (Exception ex)
                     {
@@ -208,7 +221,7 @@ namespace Wexflow.Clients.Manager
                     _windowsServiceWasStopped = false;
                     backgroundWorker1.RunWorkerAsync();
                 }
-                return _wexflowServiceClient.GetWorkflow(Login.Username, Login.Password, id);
+                return _wexflowServiceClient.GetWorkflow(Login.Token, id);
             }
 
             _windowsServiceWasStopped = true;
@@ -228,7 +241,7 @@ namespace Wexflow.Clients.Manager
             var wfId = GetSlectedWorkflowId();
             if (wfId > -1)
             {
-                var instanceId = _wexflowServiceClient.StartWorkflow(wfId, Login.Username, Login.Password);
+                var instanceId = _wexflowServiceClient.StartWorkflow(wfId, Login.Token);
                 _jobs[wfId] = instanceId;
             }
         }
@@ -240,7 +253,7 @@ namespace Wexflow.Clients.Manager
             {
                 if (_jobs.TryGetValue(wfId, out var job))
                 {
-                    _wexflowServiceClient.SuspendWorkflow(wfId, job, Login.Username, Login.Password);
+                    _wexflowServiceClient.SuspendWorkflow(wfId, job, Login.Token);
                     UpdateButtons(wfId, true);
                 }
                 else
@@ -257,7 +270,7 @@ namespace Wexflow.Clients.Manager
             {
                 if (_jobs.TryGetValue(wfId, out var job))
                 {
-                    _wexflowServiceClient.ResumeWorkflow(wfId, job, Login.Username, Login.Password);
+                    _wexflowServiceClient.ResumeWorkflow(wfId, job, Login.Token);
                 }
                 else
                 {
@@ -273,7 +286,7 @@ namespace Wexflow.Clients.Manager
             {
                 if (_jobs.TryGetValue(wfId, out var job))
                 {
-                    _wexflowServiceClient.StopWorkflow(wfId, job, Login.Username, Login.Password);
+                    _wexflowServiceClient.StopWorkflow(wfId, job, Login.Token);
                     UpdateButtons(wfId, true);
                 }
                 else
@@ -424,9 +437,11 @@ namespace Wexflow.Clients.Manager
 
         private void ButtonBackend_Click(object sender, EventArgs e)
         {
-            if (File.Exists(BACKEND))
+            if (_port > -1)
             {
-                _ = Process.Start(BACKEND, "");
+                var protocol = _https ? "https://" : "http://";
+                var url = $"{protocol}localhost:{_port}";
+                Process.Start(url);
             }
         }
 
@@ -435,12 +450,22 @@ namespace Wexflow.Clients.Manager
             var about = _resources.GetString("Form1_toolStripMenuItem1_Click_About");
             var title = _resources.GetString("Form1_toolStripMenuItem1_Click_About_Title");
 
-            if (MessageBox.Show(about
-                , title
-                , MessageBoxButtons.YesNo
-                , MessageBoxIcon.Information) == DialogResult.Yes)
+            var result = MessageBox.Show(
+                about,
+                title,
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Information
+            );
+
+            switch (result)
             {
-                _ = Process.Start("https://github.com/aelassas/Wexflow/releases/latest");
+                case DialogResult.OK:
+                    _ = Process.Start("https://github.com/aelassas/Wexflow/releases/latest");
+                    break;
+                case DialogResult.Cancel:
+                case DialogResult.None:
+                    // User clicked No or closed the dialog — do nothing
+                    break;
             }
         }
 
@@ -521,7 +546,7 @@ namespace Wexflow.Clients.Manager
             {
                 if (_jobs.TryGetValue(wfId, out var job))
                 {
-                    _wexflowServiceClient.ApproveWorkflow(wfId, job, Login.Username, Login.Password);
+                    _wexflowServiceClient.ApproveWorkflow(wfId, job, Login.Token);
                     UpdateButtons(wfId, true);
                 }
                 else
@@ -538,7 +563,7 @@ namespace Wexflow.Clients.Manager
             {
                 if (_jobs.TryGetValue(wfId, out var job))
                 {
-                    _wexflowServiceClient.RejectWorkflow(wfId, job, Login.Username, Login.Password);
+                    _wexflowServiceClient.RejectWorkflow(wfId, job, Login.Token);
                     UpdateButtons(wfId, true);
                 }
                 else

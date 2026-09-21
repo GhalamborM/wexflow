@@ -1,5 +1,5 @@
 ﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
-using System.Drawing;
+using SkiaSharp;
 using System.IO;
 using System.Runtime.Versioning;
 
@@ -24,16 +24,16 @@ namespace Wexflow.NetCore.Tests
         }
 
         [TestMethod]
-        public void ImagesConcatTest()
+        public async System.Threading.Tasks.Task ImagesConcatTest()
         {
             var images = GetFiles();
             Assert.AreEqual(0, images.Length);
-            _ = Helper.StartWorkflow(77);
+            _ = await Helper.StartWorkflow(77);
             images = GetFiles();
             Assert.AreEqual(1, images.Length);
 
             // Checking the image size
-            using var image = Image.FromFile(images[0]);
+            using var image = SKImage.FromEncodedData(images[0]);
             Assert.AreEqual(3072, image.Width);
             Assert.AreEqual(768, image.Height);
         }

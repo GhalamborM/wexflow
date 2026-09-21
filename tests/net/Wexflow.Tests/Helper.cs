@@ -1,6 +1,5 @@
 ﻿using System.Diagnostics;
 using System.IO;
-using System.Threading;
 using Wexflow.Core;
 
 namespace Wexflow.Tests
@@ -25,33 +24,33 @@ namespace Wexflow.Tests
 
         private const string USERNAME = "admin";
 
-        public static void SaveWorkflow(string xml, bool schedule)
+        public static async System.Threading.Tasks.Task SaveWorkflow(string xml, bool schedule)
         {
-            WexflowEngine.SaveWorkflow(USERNAME, Core.Db.UserProfile.SuperAdministrator, xml, schedule);
+            _ = await WexflowEngine.SaveWorkflow(USERNAME, Core.Db.UserProfile.SuperAdministrator, xml, schedule);
         }
 
-        public static void Run()
+        public static async System.Threading.Tasks.Task Run()
         {
-            WexflowEngine.Run();
+            await WexflowEngine.Run();
         }
 
-        public static void Stop()
+        public static async System.Threading.Tasks.Task Stop()
         {
-            WexflowEngine.Stop(false, false);
+            await WexflowEngine.Stop(false, false);
         }
 
-        public static System.Guid StartWorkflow(int workflowId)
+        public static async System.Threading.Tasks.Task<System.Guid> StartWorkflow(int workflowId)
         {
-            var instanceId = WexflowEngine.StartWorkflow(WexflowEngine.SuperAdminUsername, workflowId);
+            var instanceId = await WexflowEngine.StartWorkflowAsync(WexflowEngine.SuperAdminUsername, workflowId);
 
             // Wait until the workflow finishes
-            Thread.Sleep(1000);
+            await System.Threading.Tasks.Task.Delay(1000);
             var workflow = WexflowEngine.GetWorkflow(workflowId);
             var isRunning = workflow.IsRunning;
             var isWaitingForApproval = workflow.IsWaitingForApproval;
             while (isRunning && !isWaitingForApproval)
             {
-                Thread.Sleep(100);
+                await System.Threading.Tasks.Task.Delay(100);
                 workflow = WexflowEngine.GetWorkflow(workflowId);
                 isRunning = workflow.IsRunning;
                 isWaitingForApproval = workflow.IsWaitingForApproval;
@@ -60,9 +59,9 @@ namespace Wexflow.Tests
             return instanceId;
         }
 
-        public static System.Guid StartWorkflowAsync(int workflowId)
+        public static async System.Threading.Tasks.Task<System.Guid> StartWorkflowAsync(int workflowId)
         {
-            return WexflowEngine.StartWorkflow(WexflowEngine.SuperAdminUsername, workflowId);
+            return await WexflowEngine.StartWorkflowAsync(WexflowEngine.SuperAdminUsername, workflowId);
         }
 
         public static void StopWorkflow(int workflowId, System.Guid instanceId)

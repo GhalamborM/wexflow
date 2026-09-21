@@ -18,18 +18,18 @@ namespace Wexflow.NetCore.Tests
         }
 
         [TestMethod]
-        public void ApprovalTest()
+        public async System.Threading.Tasks.Task ApprovalTest()
         {
             var workflowId = 131;
-            var instanceId = Helper.StartWorkflow(workflowId);
-            Thread.Sleep(500);
+            var instanceId = await Helper.StartWorkflow(workflowId);
+            await System.Threading.Tasks.Task.Delay(500);
             Helper.ApproveWorkflow(workflowId, instanceId);
             var stopwatch = Stopwatch.StartNew();
             var workflow = Helper.GetWorkflow(workflowId);
             var isRunning = workflow.IsRunning;
             while (isRunning)
             {
-                Thread.Sleep(100);
+                await System.Threading.Tasks.Task.Delay(100);
                 workflow = Helper.GetWorkflow(workflowId);
                 isRunning = workflow.IsRunning;
             }

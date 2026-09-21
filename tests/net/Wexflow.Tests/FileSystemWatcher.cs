@@ -16,10 +16,12 @@ namespace Wexflow.Tests
         }
 
         [TestMethod]
-        public void FileSystemWatcherTest()
+#pragma warning disable CS1998
+        public async System.Threading.Tasks.Task FileSystemWatcherTest()
+#pragma warning restore CS1998
         {
             // TODO
-            //_ = Helper.StartWorkflow(144);
+            //_ = await Helper.StartWorkflow(144);
         }
     }
 }

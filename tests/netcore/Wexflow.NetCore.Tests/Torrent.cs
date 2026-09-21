@@ -7,7 +7,7 @@ namespace Wexflow.NetCore.Tests
     [TestClass]
     public class Torrent
     {
-        private static readonly string DownloadedFolder = @"C:\WexflowTesting\Torrent\The WIRED CD - Rip. Sample. Mash. Share";
+        private static readonly string DownloadedFolder = @"C:\WexflowTesting\Torrent\Big Buck Bunny";
 
         [TestInitialize]
         public void TestInitialize()
@@ -28,10 +28,10 @@ namespace Wexflow.NetCore.Tests
         }
 
         [TestMethod]
-        public void TorrentTest()
+        public async System.Threading.Tasks.Task TorrentTest()
         {
             Assert.IsFalse(File.Exists(DownloadedFolder));
-            _ = Helper.StartWorkflow(163);
+            _ = await Helper.StartWorkflow(163);
             Assert.IsTrue(Directory.Exists(DownloadedFolder));
             Thread.Sleep(30 * 1000);
         }

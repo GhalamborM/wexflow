@@ -7,7 +7,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 {
     public sealed class Db : Core.Db.Db
     {
-        private static readonly object Padlock = new object();
+        private static readonly object _padlock = new object();
         private const string DATE_TIME_FORMAT = "yyyy-MM-dd HH:mm:ss.fff";
 
         private static string _connectionString;
@@ -111,26 +111,58 @@ namespace Wexflow.Core.Db.PostgreSQL
             // Entries
             ClearEntries();
 
-            // Insert default user if necessary
+            // Insert admin user if it does not exist
+            // Backward compatibility: update admin password from MD5/SHA256 hash to PBKDF2 of "wexflow2018"
             using (var conn = new NpgsqlConnection(_connectionString))
             {
                 conn.Open();
 
-                using (var command = new NpgsqlCommand("SELECT COUNT(*) FROM " + Core.Db.User.DOCUMENT_NAME + ";", conn))
+                using (var command = new NpgsqlCommand("SELECT " +
+                    User.COLUMN_NAME_ID + ", " +
+                    User.COLUMN_NAME_PASSWORD +
+                    " FROM " + Core.Db.User.DOCUMENT_NAME +
+                    " WHERE " + User.COLUMN_NAME_USERNAME + " = @username;", conn))
                 {
-                    var usersCount = (long)command.ExecuteScalar();
+                    command.Parameters.AddWithValue("@username", "admin");
 
-                    if (usersCount == 0)
+                    using (var reader = command.ExecuteReader())
                     {
-                        InsertDefaultUser();
+                        if (reader.Read())
+                        {
+                            var id = Convert.ToInt64(reader[User.COLUMN_NAME_ID]);
+                            var password = reader[User.COLUMN_NAME_PASSWORD]?.ToString();
+
+                            if (IsMd5(password))
+                            {
+                                var sha256Password = HashPassword("wexflow2018"); // Set to default SHA256 password
+
+                                reader.Close(); // Close reader before running UPDATE
+
+                                using (var updateCmd = new NpgsqlCommand("UPDATE " +
+                                    Core.Db.User.DOCUMENT_NAME +
+                                    " SET " + User.COLUMN_NAME_PASSWORD + " = @sha256Password " +
+                                    "WHERE " + User.COLUMN_NAME_ID + " = @id;", conn))
+                                {
+                                    updateCmd.Parameters.AddWithValue("@sha256Password", sha256Password);
+                                    updateCmd.Parameters.AddWithValue("@id", id);
+                                    updateCmd.ExecuteNonQuery();
+                                    Console.WriteLine("updated!!!!!!!");
+                                }
+                            }
+                        }
+                        else
+                        {
+                            InsertDefaultUser();
+                        }
                     }
                 }
             }
+
         }
 
         public override bool CheckUserWorkflow(string userId, string workflowId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -151,7 +183,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void ClearEntries()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -167,7 +199,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void ClearStatusCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -183,7 +215,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void DeleteUser(string username, string password)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -202,7 +234,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void DeleteUserWorkflowRelationsByUserId(string userId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -219,7 +251,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void DeleteUserWorkflowRelationsByWorkflowId(string workflowDbId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -236,7 +268,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void DeleteWorkflow(string id)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -253,7 +285,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void DeleteWorkflows(string[] ids)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -279,7 +311,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.User> GetAdministrators(string keyword, UserOrderBy uo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var admins = new List<User>();
 
@@ -327,7 +359,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.Entry> GetEntries()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var entries = new List<Entry>();
 
@@ -374,7 +406,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.Entry> GetEntries(string keyword, DateTime from, DateTime to, int page, int entriesCount, EntryOrderBy eo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var entries = new List<Entry>();
 
@@ -458,6 +490,9 @@ namespace Wexflow.Core.Db.PostgreSQL
 
                             _ = sqlBuilder.Append(Entry.COLUMN_NAME_STATUS).Append(" DESC");
                             break;
+
+                        default:
+                            break;
                     }
 
                     _ = sqlBuilder.Append(" LIMIT ").Append(entriesCount).Append(" OFFSET ").Append((page - 1) * entriesCount).Append(';');
@@ -492,7 +527,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override long GetEntriesCount(string keyword, DateTime from, DateTime to)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -514,7 +549,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override Core.Db.Entry GetEntry(int workflowId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -530,7 +565,9 @@ namespace Wexflow.Core.Db.PostgreSQL
                         + Entry.COLUMN_NAME_WORKFLOW_ID + ", "
                         + Entry.COLUMN_NAME_JOB_ID
                         + " FROM " + Core.Db.Entry.DOCUMENT_NAME
-                        + " WHERE " + Entry.COLUMN_NAME_WORKFLOW_ID + " = " + workflowId + ";", conn))
+                        + " WHERE " + Entry.COLUMN_NAME_WORKFLOW_ID + " = " + workflowId
+                        + " ORDER BY " + Entry.COLUMN_NAME_STATUS_DATE + " DESC LIMIT 1;"
+                        , conn))
                     {
                         using (var reader = command.ExecuteReader())
                         {
@@ -560,7 +597,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override Core.Db.Entry GetEntry(int workflowId, Guid jobId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -607,7 +644,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override DateTime GetEntryStatusDateMax()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -635,7 +672,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override DateTime GetEntryStatusDateMin()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -663,7 +700,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.HistoryEntry> GetHistoryEntries()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var entries = new List<HistoryEntry>();
 
@@ -708,7 +745,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.HistoryEntry> GetHistoryEntries(string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var entries = new List<HistoryEntry>();
 
@@ -755,7 +792,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.HistoryEntry> GetHistoryEntries(string keyword, int page, int entriesCount)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var entries = new List<HistoryEntry>();
 
@@ -804,7 +841,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.HistoryEntry> GetHistoryEntries(string keyword, DateTime from, DateTime to, int page, int entriesCount, EntryOrderBy heo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var entries = new List<HistoryEntry>();
 
@@ -887,6 +924,9 @@ namespace Wexflow.Core.Db.PostgreSQL
 
                             _ = sqlBuilder.Append(HistoryEntry.COLUMN_NAME_STATUS).Append(" DESC");
                             break;
+
+                        default:
+                            break;
                     }
 
                     _ = sqlBuilder.Append(" LIMIT ").Append(entriesCount).Append(" OFFSET ").Append((page - 1) * entriesCount).Append(';');
@@ -920,7 +960,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override long GetHistoryEntriesCount(string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -941,7 +981,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override long GetHistoryEntriesCount(string keyword, DateTime from, DateTime to)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -963,7 +1003,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override DateTime GetHistoryEntryStatusDateMax()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -991,7 +1031,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override DateTime GetHistoryEntryStatusDateMin()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1019,7 +1059,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override string GetPassword(string username)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1048,7 +1088,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override Core.Db.StatusCount GetStatusCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1095,7 +1135,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override Core.Db.User GetUser(string username)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1139,7 +1179,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override Core.Db.User GetUserById(string userId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1183,7 +1223,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.User> GetUsers()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var users = new List<User>();
 
@@ -1228,7 +1268,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.User> GetUsers(string keyword, UserOrderBy uo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var users = new List<User>();
 
@@ -1275,7 +1315,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<string> GetUserWorkflows(string userId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var workflowIds = new List<string>();
 
@@ -1308,7 +1348,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override Core.Db.Workflow GetWorkflow(string id)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1341,7 +1381,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.Workflow> GetWorkflows()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var workflows = new List<Core.Db.Workflow>();
 
@@ -1375,7 +1415,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         private static void IncrementStatusCountColumn(string statusCountColumnName)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1431,7 +1471,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         private static void DecrementStatusCountColumn(string statusCountColumnName)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1457,7 +1497,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void InsertEntry(Core.Db.Entry entry)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1490,7 +1530,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void InsertHistoryEntry(Core.Db.HistoryEntry entry)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1521,7 +1561,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void InsertUser(Core.Db.User user)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1550,7 +1590,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void InsertUserWorkflowRelation(Core.Db.UserWorkflow userWorkflow)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1571,7 +1611,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override string InsertWorkflow(Core.Db.Workflow workflow)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1592,7 +1632,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void UpdateEntry(string id, Core.Db.Entry entry)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1619,7 +1659,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void UpdatePassword(string username, string password)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1639,7 +1679,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void UpdateUser(string id, Core.Db.User user)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1664,7 +1704,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void UpdateUsernameAndEmailAndUserProfile(string userId, string username, string email, UserProfile up)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1687,7 +1727,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void UpdateWorkflow(string dbId, Core.Db.Workflow workflow)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1707,7 +1747,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override string GetEntryLogs(string entryId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1736,7 +1776,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override string GetHistoryEntryLogs(string entryId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1765,7 +1805,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.User> GetNonRestricedUsers()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var users = new List<User>();
 
@@ -1814,7 +1854,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override string InsertRecord(Core.Db.Record record)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1859,7 +1899,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void UpdateRecord(string recordId, Core.Db.Record record)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1890,7 +1930,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void DeleteRecords(string[] recordIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 if (recordIds.Length > 0)
                 {
@@ -1919,7 +1959,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override Core.Db.Record GetRecord(string id)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -1978,7 +2018,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.Record> GetRecords(string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var records = new List<Record>();
 
@@ -2041,7 +2081,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.Record> GetRecordsCreatedBy(string createdBy)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var records = new List<Record>();
 
@@ -2103,7 +2143,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.Record> GetRecordsCreatedByOrAssignedTo(string createdBy, string assingedTo, string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var records = new List<Record>();
 
@@ -2167,7 +2207,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override string InsertVersion(Core.Db.Version version)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -2192,7 +2232,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void UpdateVersion(string versionId, Core.Db.Version version)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -2213,7 +2253,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void DeleteVersions(string[] versionIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 if (versionIds.Length > 0)
                 {
@@ -2242,7 +2282,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.Version> GetVersions(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var versions = new List<Version>();
 
@@ -2283,7 +2323,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override Core.Db.Version GetLatestVersion(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -2324,7 +2364,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override string InsertNotification(Core.Db.Notification notification)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -2353,7 +2393,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void MarkNotificationsAsRead(string[] notificationIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -2380,7 +2420,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void MarkNotificationsAsUnread(string[] notificationIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -2407,7 +2447,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void DeleteNotifications(string[] notificationIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 if (notificationIds.Length > 0)
                 {
@@ -2436,7 +2476,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.Notification> GetNotifications(string assignedTo, string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var notifications = new List<Notification>();
 
@@ -2483,7 +2523,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override bool HasNotifications(string assignedTo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -2505,7 +2545,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override string InsertApprover(Core.Db.Approver approver)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -2532,7 +2572,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void UpdateApprover(string approverId, Core.Db.Approver approver)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -2555,7 +2595,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void DeleteApproversByRecordId(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -2572,7 +2612,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void DeleteApprovedApprovers(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -2592,7 +2632,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override void DeleteApproversByUserId(string userId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 using (var conn = new NpgsqlConnection(_connectionString))
                 {
@@ -2609,7 +2649,7 @@ namespace Wexflow.Core.Db.PostgreSQL
 
         public override IEnumerable<Core.Db.Approver> GetApprovers(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var approvers = new List<Approver>();
 

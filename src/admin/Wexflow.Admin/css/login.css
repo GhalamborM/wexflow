@@ -1,0 +1,60 @@
+#login {
+    width: 280px;
+    height: 100px;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    margin-top: -120px;
+    margin-left: -120px;
+}
+
+    #login label {
+        font-weight: bold;
+        line-height: 5px;
+        width: 84px;
+    }
+
+    #login input {
+        margin-left: 10px;
+        margin-top: 3px;
+        width: 170px;
+    }
+
+    #login #stay-connected {
+        padding: 10px 0;
+        width: fit-content;
+        cursor: pointer;
+    }
+
+    #login #chk-stay-connected {
+        width: fit-content;
+        margin: 0;
+        cursor: pointer;
+    }
+
+    #login #stay-connected label {
+        width: fit-content;
+        margin-left: 5px;
+        cursor: pointer;
+        user-select: none;
+    }
+
+#login-action {
+    position: relative;
+    right: 21px;
+    left: 0;
+}
+
+    #login-action input {
+        float: right;
+        width: 84px;
+    }
+
+    #login-action #btn-login {
+        margin-left: 11px;
+    }
+
+    #login-action #forgot-password {
+        position: absolute;
+        top: 7px;
+    }

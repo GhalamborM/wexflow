@@ -38,11 +38,12 @@ namespace Wexflow.Tasks.MailsReceiver
             Password = GetSetting("password");
             MessageCount = int.Parse(GetSetting("messageCount"));
             DeleteMessages = bool.Parse(GetSetting("deleteMessages", "false"));
-            Protocol = (Protocol)Enum.Parse(typeof(Protocol), GetSetting("protocol", "pop3"), true);
+            Protocol = Enum.Parse<Protocol>(GetSetting("protocol", "pop3"), true);
         }
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Receiving mails...");
 
             var success = true;
@@ -65,6 +66,7 @@ namespace Wexflow.Tasks.MailsReceiver
 
                             for (var i = Math.Min(MessageCount, count); i > 0; i--)
                             {
+                                Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                                 var message = client.Inbox.GetMessage(uids[i]);
                                 var messageFileName = $"message_{i}_{message.Date:yyyy-MM-dd-HH-mm-ss-fff}";
                                 var messagePath = Path.Combine(Workflow.WorkflowTempFolder, messageFileName + ".eml");
@@ -101,7 +103,10 @@ namespace Wexflow.Tasks.MailsReceiver
                                     atLeastOneSucceed = true;
                                 }
 
-                                WaitOne();
+                                if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                                {
+                                    WaitOne();
+                                }
                             }
 
                             client.Disconnect(true);
@@ -156,9 +161,11 @@ namespace Wexflow.Tasks.MailsReceiver
                             client.Disconnect(true);
                         }
                         break;
+                    default:
+                        break;
                 }
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }

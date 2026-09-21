@@ -1,10 +1,10 @@
 ::@echo off
 
-set version=7.9
+set version=10.2
 set dst=wexflow
 set zip=wexflow-%version%-linux-netcore.zip
 set dstDir=.\%dst%
-set backend=Backend
+set admin=Admin
 
 if exist %zip% del %zip%
 if exist %dstDir% rmdir /s /q %dstDir%
@@ -12,85 +12,88 @@ mkdir %dstDir%
 mkdir %dstDir%\Wexflow\
 mkdir %dstDir%\Wexflow\Database\
 mkdir %dstDir%\WexflowTesting\
-mkdir %dstDir%\%backend%\
-mkdir %dstDir%\%backend%\images\
-mkdir %dstDir%\%backend%\css\
-mkdir %dstDir%\%backend%\css\images\
-mkdir %dstDir%\%backend%\js\
+mkdir %dstDir%\%admin%\
+mkdir %dstDir%\%admin%\images\
+mkdir %dstDir%\%admin%\css\
+mkdir %dstDir%\%admin%\css\images\
+mkdir %dstDir%\%admin%\js\
 ::mkdir %dstDir%\Wexflow.Scripts.MongoDB
 ::mkdir %dstDir%\Wexflow.Scripts.MongoDB\Workflows
 mkdir %dstDir%\Documentation\
 
 :: WexflowTesting
-xcopy ..\samples\WexflowTesting\* %dstDir%\WexflowTesting\ /s /e
-xcopy ..\samples\netcore\linux\WexflowTesting\* %dstDir%\WexflowTesting\ /s /e
+xcopy ..\samples\WexflowTesting\* %dstDir%\WexflowTesting\ /s /e /y
+xcopy ..\samples\netcore\linux\WexflowTesting\* %dstDir%\WexflowTesting\ /s /e /y
 
 :: Wexflow
 xcopy ..\samples\netcore\linux\Wexflow\* %dstDir%\Wexflow\ /s /e
 copy ..\src\netcore\Wexflow.Core\Workflow.xsd %dstDir%\Wexflow\
 
-:: Wexflow backend
-copy "..\src\backend\Wexflow.Backend\*.html" %dstDir%\%backend%\
+:: Wexflow admin
+copy "..\src\admin\Wexflow.Admin\*.html" %dstDir%\%admin%\
 
-xcopy "..\src\backend\Wexflow.Backend\images\*" %dstDir%\%backend%\images\ /s /e
+xcopy "..\src\admin\Wexflow.Admin\images\*" %dstDir%\%admin%\images\ /s /e
 
-xcopy "..\src\backend\Wexflow.Backend\assets\*" %dstDir%\%backend%\assets\ /s /e
+xcopy "..\src\admin\Wexflow.Admin\assets\*" %dstDir%\%admin%\assets\ /s /e
 
-copy "..\src\backend\Wexflow.Backend\css\*.css" %dstDir%\%backend%\css
-xcopy "..\src\backend\Wexflow.Backend\css\images\*" %dstDir%\%backend%\css\images`\ /s /e
+copy "..\src\admin\Wexflow.Admin\css\*.css" %dstDir%\%admin%\css
+xcopy "..\src\admin\Wexflow.Admin\css\images\*" %dstDir%\%admin%\css\images`\ /s /e
 
-copy "..\src\backend\Wexflow.Backend\js\*.js" %dstDir%\%backend%\js
+xcopy "..\src\admin\Wexflow.Admin\js\*" "%dstDir%\%admin%\js\" /s /e /y /i
+copy "..\src\admin\Wexflow.Admin\js\settings.netcore.js" "%dstDir%\%admin%\js\settings.js"
+del "%dstDir%\%admin%\js\settings.net.js"
+del "%dstDir%\%admin%\js\settings.netcore.js"
 
 :: Wexflow server
-dotnet publish ..\src\netcore\Wexflow.Server\Wexflow.Server.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Server
+dotnet publish ..\src\netcore\Wexflow.Server\Wexflow.Server.csproj --framework net10.0 --runtime linux-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Server
 copy netcore\linux\appsettings.json %dstDir%\Wexflow.Server
 
 :: MongoDB script
-dotnet publish ..\src\netcore\Wexflow.Scripts.MongoDB\Wexflow.Scripts.MongoDB.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.MongoDB
+dotnet publish ..\src\netcore\Wexflow.Scripts.MongoDB\Wexflow.Scripts.MongoDB.csproj --framework net10.0 --runtime linux-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.MongoDB
 copy netcore\linux\MongoDB\appsettings.json %dstDir%\Wexflow.Scripts.MongoDB
 xcopy "..\samples\netcore\linux\Wexflow\Workflows\*" %dstDir%\Wexflow.Scripts.MongoDB\Workflows\ /s /e
 
 :: RavenDB script
-::dotnet publish ..\src\netcore\Wexflow.Scripts.RavenDB\Wexflow.Scripts.RavenDB.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.RavenDB
+::dotnet publish ..\src\netcore\Wexflow.Scripts.RavenDB\Wexflow.Scripts.RavenDB.csproj --framework net10.0 --runtime linux-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.RavenDB
 ::copy netcore\linux\RavenDB\appsettings.json %dstDir%\Wexflow.Scripts.RavenDB
 
 :: PostgreSQL script
-dotnet publish ..\src\netcore\Wexflow.Scripts.PostgreSQL\Wexflow.Scripts.PostgreSQL.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.PostgreSQL
+dotnet publish ..\src\netcore\Wexflow.Scripts.PostgreSQL\Wexflow.Scripts.PostgreSQL.csproj --framework net10.0 --runtime linux-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.PostgreSQL
 copy netcore\linux\PostgreSQL\appsettings.json %dstDir%\Wexflow.Scripts.PostgreSQL
 
 :: SQLServer script
-dotnet publish ..\src\netcore\Wexflow.Scripts.SQLServer\Wexflow.Scripts.SQLServer.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.SQLServer
+dotnet publish ..\src\netcore\Wexflow.Scripts.SQLServer\Wexflow.Scripts.SQLServer.csproj --framework net10.0 --runtime linux-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.SQLServer
 copy netcore\linux\SQLServer\appsettings.json %dstDir%\Wexflow.Scripts.SQLServer
 
 :: MySQL script
-dotnet publish ..\src\netcore\Wexflow.Scripts.MySQL\Wexflow.Scripts.MySQL.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.MySQL
+dotnet publish ..\src\netcore\Wexflow.Scripts.MySQL\Wexflow.Scripts.MySQL.csproj --framework net10.0 --runtime linux-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.MySQL
 copy netcore\linux\MySQL\appsettings.json %dstDir%\Wexflow.Scripts.MySQL
 
 :: SQLite script
-dotnet publish ..\src\netcore\Wexflow.Scripts.SQLite\Wexflow.Scripts.SQLite.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.SQLite
+dotnet publish ..\src\netcore\Wexflow.Scripts.SQLite\Wexflow.Scripts.SQLite.csproj --framework net10.0 --runtime linux-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.SQLite
 copy netcore\linux\SQLite\appsettings.json %dstDir%\Wexflow.Scripts.SQLite
 
 :: LiteDB script
-dotnet publish ..\src\netcore\Wexflow.Scripts.LiteDB\Wexflow.Scripts.LiteDB.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.LiteDB
+dotnet publish ..\src\netcore\Wexflow.Scripts.LiteDB\Wexflow.Scripts.LiteDB.csproj --framework net10.0 --runtime linux-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.LiteDB
 copy netcore\linux\LiteDB\appsettings.json %dstDir%\Wexflow.Scripts.LiteDB
 
 :: Firebird script
-::dotnet publish ..\src\netcore\Wexflow.Scripts.Firebird\Wexflow.Scripts.Firebird.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.Firebird
+::dotnet publish ..\src\netcore\Wexflow.Scripts.Firebird\Wexflow.Scripts.Firebird.csproj --framework net10.0 --runtime linux-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.Firebird
 :::copy netcore\linux\Firebird\appsettings.json %dstDir%\Wexflow.Scripts.Firebird
 
 :: Oracle script
-dotnet publish ..\src\netcore\Wexflow.Scripts.Oracle\Wexflow.Scripts.Oracle.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.Oracle
-copy netcore\linux\Oracle\appsettings.json %dstDir%\Wexflow.Scripts.Oracle
+@REM dotnet publish ..\src\netcore\Wexflow.Scripts.Oracle\Wexflow.Scripts.Oracle.csproj --framework net10.0 --runtime linux-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.Oracle
+@REM copy netcore\linux\Oracle\appsettings.json %dstDir%\Wexflow.Scripts.Oracle
 
 :: MariaDB script
-::dotnet publish ..\src\netcore\Wexflow.Scripts.MariaDB\Wexflow.Scripts.MariaDB.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.MariaDB
+::dotnet publish ..\src\netcore\Wexflow.Scripts.MariaDB\Wexflow.Scripts.MariaDB.csproj --framework net10.0 --runtime linux-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.MariaDB
 ::copy netcore\linux\MariaDB\appsettings.json %dstDir%\Wexflow.Scripts.MariaDB
 
 :: Wexflow.Clients.CommandLine
-dotnet publish ..\src\netcore\Wexflow.Clients.CommandLine\Wexflow.Clients.CommandLine.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Clients.CommandLine
+dotnet publish ..\src\netcore\Wexflow.Clients.CommandLine\Wexflow.Clients.CommandLine.csproj --framework net10.0 --runtime linux-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Clients.CommandLine
 
 :: Wexflow.Scripts.RunAllWorkflows
-dotnet publish ..\src\netcore\Wexflow.Scripts.RunAllWorkflows\Wexflow.Scripts.RunAllWorkflows.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.RunAllWorkflows
+dotnet publish ..\src\netcore\Wexflow.Scripts.RunAllWorkflows\Wexflow.Scripts.RunAllWorkflows.csproj --framework net10.0 --runtime linux-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.RunAllWorkflows
 
 :: wexflow.service
 copy netcore\linux\wexflow.service %dstDir%
@@ -104,6 +107,9 @@ copy "netcore\doc\_README.txt" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Core\Workflow.xml" %dstDir%\Documentation\_Workflow.xml
 copy "..\src\netcore\Wexflow.Tasks.CsvToXml\CsvToXml.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.FileExists\FileExists.xml" %dstDir%\Documentation\
+copy "..\src\netcore\Wexflow.Tasks.FileMatch\FileMatch.xml" %dstDir%\Documentation\
+copy "..\src\netcore\Wexflow.Tasks.FileNotExist\FileNotExist.xml" %dstDir%\Documentation\
+copy "..\src\netcore\Wexflow.Tasks.FileNotMatch\FileNotMatch.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.FilesConcat\FilesConcat.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.FilesCopier\FilesCopier.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.FilesExist\FilesExist.xml" %dstDir%\Documentation\
@@ -158,7 +164,6 @@ copy "..\src\netcore\Wexflow.Tasks.FilesEncryptor\FilesEncryptor.xml" %dstDir%\D
 copy "..\src\netcore\Wexflow.Tasks.FilesDecryptor\FilesDecryptor.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.TextsEncryptor\TextsEncryptor.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.TextsDecryptor\TextsDecryptor.xml" %dstDir%\Documentation\
-copy "..\src\netcore\Wexflow.Tasks.FileMatch\FileMatch.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.Ping\Ping.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.HttpPost\HttpPost.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.HttpPut\HttpPut.xml" %dstDir%\Documentation\

@@ -18,6 +18,7 @@ namespace Wexflow.Tasks.FilesSplitter
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Splitting files into chunks...");
 
             var success = true;
@@ -31,17 +32,18 @@ namespace Wexflow.Tasks.FilesSplitter
                 {
                     try
                     {
+                        Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                         var index = 0;
 
                         const int bufferSize = 20 * 1024;
                         var buffer = new byte[bufferSize];
 
-                        using (Stream input = File.OpenRead(file.Path))
+                        using (var input = File.OpenRead(file.Path))
                         {
                             while (input.Position < input.Length)
                             {
                                 var chunkPath = Path.Combine(Workflow.WorkflowTempFolder, $"{file.FileName}_{index + 1}");
-                                using (Stream output = File.Create(chunkPath))
+                                using (var output = File.Create(chunkPath))
                                 {
                                     int remaining = ChunkSize, bytesRead;
                                     while (remaining > 0 && (bytesRead = input.Read(buffer, 0, Math.Min(remaining, bufferSize))) > 0)
@@ -63,7 +65,7 @@ namespace Wexflow.Tasks.FilesSplitter
                             atLeastOneSucceed = true;
                         }
                     }
-                    catch (ThreadInterruptedException)
+                    catch (OperationCanceledException)
                     {
                         throw;
                     }
@@ -74,7 +76,10 @@ namespace Wexflow.Tasks.FilesSplitter
                     }
                     finally
                     {
-                        WaitOne();
+                        if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                        {
+                            WaitOne();
+                        }
                     }
                 }
             }

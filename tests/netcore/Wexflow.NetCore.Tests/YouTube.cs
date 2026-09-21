@@ -16,9 +16,11 @@ namespace Wexflow.NetCore.Tests
         }
 
         [TestMethod]
-        public void YouTubeTest()
+#pragma warning disable CS1998
+        public async System.Threading.Tasks.Task YouTubeTest()
+#pragma warning restore CS1998
         {
-            //Helper.StartWorkflow(119);
+            //await Helper.StartWorkflow(119);
             // TODO
         }
     }

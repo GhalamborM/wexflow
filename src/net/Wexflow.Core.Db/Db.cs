@@ -1,7 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
+using Wexflow.Core.Auth;
 
 namespace Wexflow.Core.Db
 {
@@ -38,7 +40,7 @@ namespace Wexflow.Core.Db
 
         protected void InsertDefaultUser()
         {
-            var password = GetMd5("wexflow2018");
+            var password = HashPassword("wexflow2018");
             var user = new User { Username = "admin", Password = password, UserProfile = UserProfile.SuperAdministrator };
             InsertUser(user);
         }
@@ -140,9 +142,9 @@ namespace Wexflow.Core.Db
             {
                 var inputBytes = Encoding.ASCII.GetBytes(input);
                 var hashBytes = md5.ComputeHash(inputBytes);
-
                 // Convert the byte array to hexadecimal string
                 var sb = new StringBuilder();
+                
                 for (var i = 0; i < hashBytes.Length; i++)
                 {
                     _ = sb.Append(hashBytes[i].ToString("x2"));
@@ -150,5 +152,47 @@ namespace Wexflow.Core.Db
                 return sb.ToString();
             }
         }
+
+        public static string ComputeSha256(string input)
+        {
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(input);
+                byte[] hashBytes = sha256.ComputeHash(bytes);
+
+                StringBuilder sb = new StringBuilder();
+                foreach (byte b in hashBytes)
+                    sb.Append(b.ToString("x2")); // Lowercase hex
+
+                return sb.ToString();
+            }
+        }
+
+        public static bool IsMd5(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input)) return false;
+
+            // MD5 hashes are 32 hex characters (case-insensitive)
+            return Regex.IsMatch(input, @"\A\b[0-9a-fA-F]{32}\b\Z");
+        }
+
+        public static bool IsSha256(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input)) return false;
+
+            // SHA-256 hash is 64 hex characters (0-9, a-f) (case-insensitive)
+            return Regex.IsMatch(input, "^[a-fA-F0-9]{64}$");
+        }
+
+        public static string HashPassword(string password)
+        {
+            return PasswordHasher.HashPassword(password);
+        }
+
+        public static bool VerifyPassword(string password, string storedHash)
+        {
+            return PasswordHasher.VerifyPassword(password, storedHash);
+        }
+
     }
 }

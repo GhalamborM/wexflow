@@ -1,27 +1,27 @@
 ::@echo off
 
-set version=7.9
+set version=10.2
 set dst=wexflow-%version%-windows-netcore
 set dstDir=.\%dst%
-set backend=Backend
+set admin=Admin
 
 if exist %dstDir% rmdir /s /q %dstDir%
 mkdir %dstDir%
 mkdir %dstDir%\Wexflow-netcore\
 mkdir %dstDir%\Wexflow-netcore\Database\
 mkdir %dstDir%\WexflowTesting\
-mkdir %dstDir%\%backend%\
-mkdir %dstDir%\%backend%\images\
-mkdir %dstDir%\%backend%\css\
-mkdir %dstDir%\%backend%\css\images\
-mkdir %dstDir%\%backend%\js\
+mkdir %dstDir%\%admin%\
+mkdir %dstDir%\%admin%\images\
+mkdir %dstDir%\%admin%\css\
+mkdir %dstDir%\%admin%\css\images\
+mkdir %dstDir%\%admin%\js\
 ::mkdir %dstDir%\Wexflow.Scripts.MongoDB
 ::mkdir %dstDir%\Wexflow.Scripts.MongoDB\Workflows
 mkdir %dstDir%\Documentation\
 
 :: WexflowTesting
-xcopy ..\samples\WexflowTesting\* %dstDir%\WexflowTesting\ /s /e
-xcopy ..\samples\netcore\windows\WexflowTesting\* %dstDir%\WexflowTesting\ /s /e
+xcopy ..\samples\WexflowTesting\* %dstDir%\WexflowTesting\ /s /e /y
+xcopy ..\samples\netcore\windows\WexflowTesting\* %dstDir%\WexflowTesting\ /s /e /y
 
 :: Wexflow-netcore
 xcopy ..\samples\netcore\windows\Wexflow\* %dstDir%\Wexflow-netcore\ /s /e
@@ -29,79 +29,83 @@ copy ..\src\netcore\Wexflow.Core\GlobalVariables.xml %dstDir%\Wexflow-netcore\
 copy ..\src\netcore\Wexflow.Core\Wexflow.xml %dstDir%\Wexflow-netcore\
 copy ..\src\netcore\Wexflow.Core\Workflow.xsd %dstDir%\Wexflow-netcore\
 
-:: Wexflow backend
-copy "..\src\backend\Wexflow.Backend\*.html" %dstDir%\%backend%\
+:: Wexflow admin
+copy "..\src\admin\Wexflow.Admin\*.html" %dstDir%\%admin%\
 
-xcopy "..\src\backend\Wexflow.Backend\images\*" %dstDir%\%backend%\images\ /s /e
+xcopy "..\src\admin\Wexflow.Admin\images\*" %dstDir%\%admin%\images\ /s /e
 
-xcopy "..\src\backend\Wexflow.Backend\assets\*" %dstDir%\%backend%\assets\ /s /e
+xcopy "..\src\admin\Wexflow.Admin\assets\*" %dstDir%\%admin%\assets\ /s /e
 
-copy "..\src\backend\Wexflow.Backend\css\*.css" %dstDir%\%backend%\css
-xcopy "..\src\backend\Wexflow.Backend\css\images\*" %dstDir%\%backend%\css\images`\ /s /e
+copy "..\src\admin\Wexflow.Admin\css\*.css" %dstDir%\%admin%\css
+xcopy "..\src\admin\Wexflow.Admin\css\images\*" %dstDir%\%admin%\css\images`\ /s /e
 
-copy "..\src\backend\Wexflow.Backend\js\*.js" %dstDir%\%backend%\js
+xcopy "..\src\admin\Wexflow.Admin\js\*" "%dstDir%\%admin%\js\" /s /e /y /i
+copy "..\src\admin\Wexflow.Admin\js\settings.netcore.js" "%dstDir%\%admin%\js\settings.js"
+del "%dstDir%\%admin%\js\settings.net.js"
+del "%dstDir%\%admin%\js\settings.netcore.js"
 
 :: Wexflow server
-dotnet publish ..\src\netcore\Wexflow.Server\Wexflow.Server.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Server
+dotnet publish ..\src\netcore\Wexflow.Server\Wexflow.Server.csproj --framework net10.0 --runtime win-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Server
+copy netcore\windows\appsettings.json %dstDir%\Wexflow.Server
 copy netcore\windows\install.bat %dstDir%
 copy netcore\windows\run.bat %dstDir%
 
 :: MongoDB script
-dotnet publish ..\src\netcore\Wexflow.Scripts.MongoDB\Wexflow.Scripts.MongoDB.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.MongoDB
+dotnet publish ..\src\netcore\Wexflow.Scripts.MongoDB\Wexflow.Scripts.MongoDB.csproj --framework net10.0 --runtime win-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.MongoDB
 copy netcore\windows\MongoDB\appsettings.json %dstDir%\Wexflow.Scripts.MongoDB
 xcopy "..\samples\netcore\windows\Wexflow\Workflows\*" %dstDir%\Wexflow.Scripts.MongoDB\Workflows\ /s /e
 copy netcore\windows\install-MongoDB.bat %dstDir%
 
 :: RavenDB script
-::dotnet publish ..\src\netcore\Wexflow.Scripts.RavenDB\Wexflow.Scripts.RavenDB.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.RavenDB
+::dotnet publish ..\src\netcore\Wexflow.Scripts.RavenDB\Wexflow.Scripts.RavenDB.csproj --framework net10.0 --runtime win-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.RavenDB
 ::copy netcore\windows\RavenDB\appsettings.json %dstDir%\Wexflow.Scripts.RavenDB
 ::copy netcore\windows\install-RavenDB.bat %dstDir%
 
 :: PostgreSQL script
-dotnet publish ..\src\netcore\Wexflow.Scripts.PostgreSQL\Wexflow.Scripts.PostgreSQL.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.PostgreSQL
+dotnet publish ..\src\netcore\Wexflow.Scripts.PostgreSQL\Wexflow.Scripts.PostgreSQL.csproj --framework net10.0 --runtime win-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.PostgreSQL
 copy netcore\windows\PostgreSQL\appsettings.json %dstDir%\Wexflow.Scripts.PostgreSQL
 copy netcore\windows\install-PostgreSQL.bat %dstDir%
 
 :: SQLServer script
-dotnet publish ..\src\netcore\Wexflow.Scripts.SQLServer\Wexflow.Scripts.SQLServer.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.SQLServer
+dotnet publish ..\src\netcore\Wexflow.Scripts.SQLServer\Wexflow.Scripts.SQLServer.csproj --framework net10.0 --runtime win-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.SQLServer
 copy netcore\windows\SQLServer\appsettings.json %dstDir%\Wexflow.Scripts.SQLServer
 copy netcore\windows\install-SQLServer.bat %dstDir%
 
 :: MySQL script
-dotnet publish ..\src\netcore\Wexflow.Scripts.MySQL\Wexflow.Scripts.MySQL.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.MySQL
+dotnet publish ..\src\netcore\Wexflow.Scripts.MySQL\Wexflow.Scripts.MySQL.csproj --framework net10.0 --runtime win-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.MySQL
 copy netcore\windows\MySQL\appsettings.json %dstDir%\Wexflow.Scripts.MySQL
 copy netcore\windows\install-MySQL.bat %dstDir%
 
 :: SQLite script
-dotnet publish ..\src\netcore\Wexflow.Scripts.SQLite\Wexflow.Scripts.SQLite.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.SQLite
+dotnet publish ..\src\netcore\Wexflow.Scripts.SQLite\Wexflow.Scripts.SQLite.csproj --framework net10.0 --runtime win-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.SQLite
 copy netcore\windows\SQLite\appsettings.json %dstDir%\Wexflow.Scripts.SQLite
 copy netcore\windows\install-SQLite.bat %dstDir%
 
 :: LiteDB script
-dotnet publish ..\src\netcore\Wexflow.Scripts.LiteDB\Wexflow.Scripts.LiteDB.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.LiteDB
+dotnet publish ..\src\netcore\Wexflow.Scripts.LiteDB\Wexflow.Scripts.LiteDB.csproj --framework net10.0 --runtime win-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.LiteDB
 copy netcore\windows\LiteDB\appsettings.json %dstDir%\Wexflow.Scripts.LiteDB
 copy netcore\windows\install-LiteDB.bat %dstDir%
 
 :: Firebird script
-::dotnet publish ..\src\netcore\Wexflow.Scripts.Firebird\Wexflow.Scripts.Firebird.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.Firebird
+::dotnet publish ..\src\netcore\Wexflow.Scripts.Firebird\Wexflow.Scripts.Firebird.csproj --framework net10.0 --runtime win-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.Firebird
 ::copy netcore\windows\Firebird\appsettings.json %dstDir%\Wexflow.Scripts.Firebird
 ::copy netcore\windows\install-Firebird.bat %dstDir%
 
 :: Oracle script
-dotnet publish ..\src\netcore\Wexflow.Scripts.Oracle\Wexflow.Scripts.Oracle.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.Oracle
-copy netcore\windows\Oracle\appsettings.json %dstDir%\Wexflow.Scripts.Oracle
-copy netcore\windows\install-Oracle.bat %dstDir%
+@REM dotnet publish ..\src\netcore\Wexflow.Scripts.Oracle\Wexflow.Scripts.Oracle.csproj --framework net10.0 --runtime win-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.Oracle
+@REM copy netcore\windows\Oracle\appsettings.json %dstDir%\Wexflow.Scripts.Oracle
+@REM copy netcore\windows\install-Oracle.bat %dstDir%
 
 :: MariaDB script
-::dotnet publish ..\src\netcore\Wexflow.Scripts.MariaDB\Wexflow.Scripts.MariaDB.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.MariaDB
+::dotnet publish ..\src\netcore\Wexflow.Scripts.MariaDB\Wexflow.Scripts.MariaDB.csproj --framework net10.0 --runtime win-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.MariaDB
 ::copy netcore\windows\MariaDB\appsettings.json %dstDir%\Wexflow.Scripts.MariaDB
 ::copy netcore\windows\install-MariaDB.bat %dstDir%
 
 :: Wexflow.Clients.CommandLine
-dotnet publish ..\src\netcore\Wexflow.Clients.CommandLine\Wexflow.Clients.CommandLine.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Clients.CommandLine
+dotnet publish ..\src\netcore\Wexflow.Clients.CommandLine\Wexflow.Clients.CommandLine.csproj --framework net10.0 --runtime win-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Clients.CommandLine
 
 :: Wexflow.Scripts.RunAllWorkflows
-dotnet publish ..\src\netcore\Wexflow.Scripts.RunAllWorkflows\Wexflow.Scripts.RunAllWorkflows.csproj --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.RunAllWorkflows
+dotnet publish ..\src\netcore\Wexflow.Scripts.RunAllWorkflows\Wexflow.Scripts.RunAllWorkflows.csproj --framework net10.0 --runtime win-x64 --configuration Release --force --output %~dp0\%dstDir%\Wexflow.Scripts.RunAllWorkflows
 copy netcore\windows\run-all-workflows.bat %dstDir%
 
 :: License
@@ -112,6 +116,9 @@ copy "netcore\doc\_README.txt" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Core\Workflow.xml" %dstDir%\Documentation\_Workflow.xml
 copy "..\src\netcore\Wexflow.Tasks.CsvToXml\CsvToXml.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.FileExists\FileExists.xml" %dstDir%\Documentation\
+copy "..\src\netcore\Wexflow.Tasks.FileMatch\FileMatch.xml" %dstDir%\Documentation\
+copy "..\src\netcore\Wexflow.Tasks.FileNotExist\FileNotExist.xml" %dstDir%\Documentation\
+copy "..\src\netcore\Wexflow.Tasks.FileNotMatch\FileNotMatch.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.FilesConcat\FilesConcat.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.FilesCopier\FilesCopier.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.FilesExist\FilesExist.xml" %dstDir%\Documentation\
@@ -166,7 +173,6 @@ copy "..\src\netcore\Wexflow.Tasks.FilesEncryptor\FilesEncryptor.xml" %dstDir%\D
 copy "..\src\netcore\Wexflow.Tasks.FilesDecryptor\FilesDecryptor.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.TextsEncryptor\TextsEncryptor.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.TextsDecryptor\TextsDecryptor.xml" %dstDir%\Documentation\
-copy "..\src\netcore\Wexflow.Tasks.FileMatch\FileMatch.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.Ping\Ping.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.HttpPost\HttpPost.xml" %dstDir%\Documentation\
 copy "..\src\netcore\Wexflow.Tasks.HttpPut\HttpPut.xml" %dstDir%\Documentation\

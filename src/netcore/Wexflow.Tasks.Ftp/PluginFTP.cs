@@ -40,16 +40,16 @@ namespace Wexflow.Tasks.Ftp
 
         public override FileInf[] List()
         {
-            List<FileInf> files = new();
+            var files = new List<FileInf>();
 
-            FtpClient client = new() { Host = Server, Port = Port, Credentials = new NetworkCredential(User, Password) };
+            var client = new FtpClient { Host = Server, Port = Port, Credentials = new NetworkCredential(User, Password) };
 
             if (DebugLogs)
             {
                 client.LegacyLogger = OnLogEvent;
             }
 
-            client.Connect();
+            client.AutoConnect();
             client.SetWorkingDirectory(Path);
 
             var ftpFiles = ListFiles(client, Task.Id);
@@ -67,7 +67,7 @@ namespace Wexflow.Tasks.Ftp
 
         public static FileInf[] ListFiles(FtpClient client, int taskId)
         {
-            List<FileInf> files = new();
+            var files = new List<FileInf>();
 
             var ftpListItems = client.GetListing();
 
@@ -84,14 +84,14 @@ namespace Wexflow.Tasks.Ftp
 
         public override void Upload(FileInf file)
         {
-            FtpClient client = new() { Host = Server, Port = Port, Credentials = new NetworkCredential(User, Password) };
+            var client = new FtpClient { Host = Server, Port = Port, Credentials = new NetworkCredential(User, Password) };
 
             if (DebugLogs)
             {
                 client.LegacyLogger = OnLogEvent;
             }
 
-            client.Connect();
+            client.AutoConnect();
             client.SetWorkingDirectory(Path);
 
             UploadFile(client, file);
@@ -102,27 +102,29 @@ namespace Wexflow.Tasks.Ftp
 
         public static void UploadFile(FtpClient client, FileInf file)
         {
-            using Stream istream = File.Open(file.Path, FileMode.Open, FileAccess.Read);
-            using var ostream = client.OpenWrite(file.RenameToOrName);
-            var buffer = new byte[BUFFER_SIZE];
-            int r;
-
-            while ((r = istream.Read(buffer, 0, BUFFER_SIZE)) > 0)
+            using (Stream istream = File.Open(file.Path, FileMode.Open, FileAccess.Read))
+            using (var ostream = client.OpenWrite(file.RenameToOrName))
             {
-                ostream.Write(buffer, 0, r);
+                var buffer = new byte[BUFFER_SIZE];
+                int r;
+
+                while ((r = istream.Read(buffer, 0, BUFFER_SIZE)) > 0)
+                {
+                    ostream.Write(buffer, 0, r);
+                }
             }
         }
 
         public override void Download(FileInf file)
         {
-            FtpClient client = new() { Host = Server, Port = Port, Credentials = new NetworkCredential(User, Password) };
+            var client = new FtpClient { Host = Server, Port = Port, Credentials = new NetworkCredential(User, Password) };
 
             if (DebugLogs)
             {
                 client.LegacyLogger = OnLogEvent;
             }
 
-            client.Connect();
+            client.AutoConnect();
             client.SetWorkingDirectory(Path);
 
             DownloadFile(client, file, Task);
@@ -157,14 +159,14 @@ namespace Wexflow.Tasks.Ftp
 
         public override void Delete(FileInf file)
         {
-            FtpClient client = new() { Host = Server, Port = Port, Credentials = new NetworkCredential(User, Password) };
+            var client = new FtpClient { Host = Server, Port = Port, Credentials = new NetworkCredential(User, Password) };
 
             if (DebugLogs)
             {
                 client.LegacyLogger = OnLogEvent;
             }
 
-            client.Connect();
+            client.AutoConnect();
             client.SetWorkingDirectory(Path);
 
             client.DeleteFile(file.Path);

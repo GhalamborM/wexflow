@@ -1,6 +1,5 @@
 ﻿using System;
 using System.IO;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -17,6 +16,7 @@ namespace Wexflow.Tasks.TextsEncryptor
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Encrypting files...");
             var status = Status.Success;
             var succeeded = true;
@@ -27,13 +27,17 @@ namespace Wexflow.Tasks.TextsEncryptor
                 var files = SelectFiles();
                 foreach (var file in files)
                 {
+                    Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                     var destPath = Path.Combine(Workflow.WorkflowTempFolder, file.FileName);
                     succeeded &= Encrypt(file.Path, destPath);
                     if (!atLeastOneSuccess && succeeded)
                     {
                         atLeastOneSuccess = true;
                     }
-                    WaitOne();
+                    if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        WaitOne();
+                    }
                 }
 
                 if (!succeeded && atLeastOneSuccess)
@@ -45,7 +49,7 @@ namespace Wexflow.Tasks.TextsEncryptor
                     status = Status.Error;
                 }
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }
@@ -98,8 +102,8 @@ namespace Wexflow.Tasks.TextsEncryptor
             cryptoStream.FlushFinalBlock();
             // Create the final bytes as a concatenation of the random salt bytes, the random iv bytes and the cipher bytes.
             var cipherTextBytes = saltStringBytes;
-            cipherTextBytes = cipherTextBytes.Concat(ivStringBytes).ToArray();
-            cipherTextBytes = cipherTextBytes.Concat(memoryStream.ToArray()).ToArray();
+            cipherTextBytes = [.. cipherTextBytes, .. ivStringBytes];
+            cipherTextBytes = [.. cipherTextBytes, .. memoryStream.ToArray()];
             memoryStream.Close();
             cryptoStream.Close();
             return Convert.ToBase64String(cipherTextBytes);

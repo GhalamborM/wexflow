@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Globalization;
 using System.Threading;
 using System.Xml.Linq;
 using Wexflow.Core;
@@ -20,6 +19,7 @@ namespace Wexflow.Tasks.Wait
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             InfoFormat("Waiting for {0} ...", Duration);
 
             var success = true;
@@ -30,12 +30,28 @@ namespace Wexflow.Tasks.Wait
                 double t = 0;
                 while (t < duration)
                 {
-                    _ = _cancellationTokenSource.Token.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(1000));
-                    t += 1000;
-                    WaitOne();
+                    Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
+
+                    // Sleep in 1-second intervals (or less if near end)
+                    var remaining = duration - t;
+                    var waitTime = TimeSpan.FromMilliseconds(Math.Min(1000, remaining));
+
+                    // Wait for either cancellation or timeout
+                    var canceled = Workflow.CancellationTokenSource.Token.WaitHandle.WaitOne(waitTime);
+                    if (canceled)
+                    {
+                        throw new OperationCanceledException();
+                    }
+
+                    t += waitTime.TotalMilliseconds;
+
+                    if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        WaitOne();
+                    }
                 }
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }
@@ -45,16 +61,11 @@ namespace Wexflow.Tasks.Wait
                 success = false;
             }
 
-            var status = Status.Success;
-
-            if (!success)
-            {
-                status = Status.Error;
-            }
-
+            var status = success ? Status.Success : Status.Error;
             Info("Task finished.");
             return new TaskStatus(status);
         }
+
 
         public override void Stop()
         {

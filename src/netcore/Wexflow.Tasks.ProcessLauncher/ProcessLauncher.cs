@@ -15,6 +15,7 @@ namespace Wexflow.Tasks.ProcessLauncher
         public bool HideGui { get; set; }
         public bool GeneratesFiles { get; set; }
         public bool LoadAllFiles { get; set; }
+        public bool IgnoreExitCode { get; set; }
 
         private const string VAR_FILE_PATH = "$filePath";
         private const string VAR_FILE_NAME = "$fileName";
@@ -29,10 +30,12 @@ namespace Wexflow.Tasks.ProcessLauncher
             HideGui = bool.Parse(GetSetting("hideGui"));
             GeneratesFiles = bool.Parse(GetSetting("generatesFiles"));
             LoadAllFiles = bool.Parse(GetSetting("loadAllFiles", "false"));
+            IgnoreExitCode = bool.Parse(GetSetting("ignoreExitCode", "false"));
         }
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Launching process...");
 
             if (GeneratesFiles && !(ProcessCmd.Contains(VAR_FILE_NAME) && ProcessCmd.Contains(VAR_OUTPUT) && (ProcessCmd.Contains(VAR_FILE_NAME) || ProcessCmd.Contains(VAR_FILE_NAME_WITHOUT_EXTENSION))))
@@ -56,6 +59,7 @@ namespace Wexflow.Tasks.ProcessLauncher
 
                 try
                 {
+                    Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                     cmd = ProcessCmd.Replace($"{{{VAR_FILE_PATH}}}", $"\"{file.Path}\"");
 
                     var outputRegex = OutputRegex();
@@ -84,7 +88,7 @@ namespace Wexflow.Tasks.ProcessLauncher
                         return new TaskStatus(Status.Error, false);
                     }
                 }
-                catch (ThreadInterruptedException)
+                catch (OperationCanceledException)
                 {
                     throw;
                 }
@@ -95,7 +99,10 @@ namespace Wexflow.Tasks.ProcessLauncher
                 }
                 finally
                 {
-                    WaitOne();
+                    if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        WaitOne();
+                    }
                 }
 
                 if (StartProcess(ProcessPath, cmd, HideGui).Status == Status.Success)
@@ -160,10 +167,12 @@ namespace Wexflow.Tasks.ProcessLauncher
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
                 process.WaitForExit();
+                InfoFormat("ExitCode: {0}", process.ExitCode);
 
-                return new TaskStatus(Status.Success, false);
+                var status = process.ExitCode == 0 || IgnoreExitCode ? Status.Success : Status.Error;
+                return new TaskStatus(status, false);
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }

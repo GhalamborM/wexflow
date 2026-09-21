@@ -22,7 +22,7 @@ namespace Wexflow.Tasks.FilesJoiner
 
         private static (string RenamedPath, int Number) GetNumberPart(string path)
         {
-            var lastUnderscoreIndex = path.LastIndexOf("_", StringComparison.InvariantCulture);
+            var lastUnderscoreIndex = path.LastIndexOf('_');
             if (lastUnderscoreIndex == -1)
             {
                 return (path, -1);
@@ -60,6 +60,7 @@ namespace Wexflow.Tasks.FilesJoiner
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Concatenating files...");
 
             var success = true;
@@ -67,7 +68,7 @@ namespace Wexflow.Tasks.FilesJoiner
 
             foreach (var file in GetFiles())
             {
-                if (JoinFiles(file.FileName, file.Files.ToArray()))
+                if (JoinFiles(file.FileName, [.. file.Files]))
                 {
                     atLeastOneSucceed = true;
                 }
@@ -122,13 +123,14 @@ namespace Wexflow.Tasks.FilesJoiner
                 {
                     foreach (var file in files)
                     {
+                        Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                         Info($"Joiner {file.Path}");
                         try
                         {
                             using var input = File.OpenRead(file.Path);
                             input.CopyTo(output);
                         }
-                        catch (ThreadInterruptedException)
+                        catch (OperationCanceledException)
                         {
                             throw;
                         }
@@ -139,7 +141,10 @@ namespace Wexflow.Tasks.FilesJoiner
                         }
                         finally
                         {
-                            WaitOne();
+                            if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                            {
+                                WaitOne();
+                            }
                         }
                     }
 

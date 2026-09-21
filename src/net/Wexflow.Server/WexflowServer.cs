@@ -49,11 +49,17 @@ namespace Wexflow.Server
         {
             InitializeComponent();
             ServiceName = "Wexflow";
-            var startThread = new Thread(StartThread) { IsBackground = true };
+            var startThread = new Thread(async () =>
+            {
+                await StartThread();
+            })
+            {
+                IsBackground = true
+            };
             startThread.Start();
         }
 
-        private void StartThread()
+        private async System.Threading.Tasks.Task StartThread()
         {
             if (EnableWorkflowsHotFolder)
             {
@@ -89,7 +95,7 @@ namespace Wexflow.Server
                 Logger.Info("Records hot folder is disabled.");
             }
 
-            WexflowEngine.Run();
+            await WexflowEngine.Run();
         }
 
         protected override void OnStart(string[] args)
@@ -97,13 +103,14 @@ namespace Wexflow.Server
             _webApp?.Dispose();
 
             var port = int.Parse(Config["WexflowServicePort"]);
-            var url = $"http://+:{port}";
+            var https = bool.TryParse(Config["HTTPS"], out var res) && res;
+            var url = $"{(https ? "https" : "http")}://+:{port}";
             _webApp = WebApp.Start<Startup>(url);
         }
 
         protected override void OnStop()
         {
-            WexflowEngine.Stop(true, true);
+            WexflowEngine.Stop(true, true).Wait();
 
             if (_webApp != null)
             {

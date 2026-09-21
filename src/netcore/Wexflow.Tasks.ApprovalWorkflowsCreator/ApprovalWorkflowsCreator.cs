@@ -23,8 +23,9 @@ namespace Wexflow.Tasks.ApprovalWorkflowsCreator
             DeleteWorkflowOnApproval = bool.Parse(GetSetting("deleteWorkflowOnApproval", "true"));
         }
 
-        public override TaskStatus Run()
+        public async override System.Threading.Tasks.Task<TaskStatus> RunAsync()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Creating and starting approval workflows for records...");
 
             var success = true;
@@ -47,6 +48,7 @@ namespace Wexflow.Tasks.ApprovalWorkflowsCreator
                         {
                             try
                             {
+                                Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
                                 var record = Workflow.Database.GetRecord(recordId);
                                 var workflowId = Workflow.WexflowEngine.Workflows.Select(w => w.Id).Max() + 1;
                                 var workflowName =
@@ -71,7 +73,7 @@ namespace Wexflow.Tasks.ApprovalWorkflowsCreator
                                     + "</Workflow>\r\n";
 
                                 var approver = Workflow.WexflowEngine.GetUser(Approver);
-                                var workflowDbId = Workflow.WexflowEngine.SaveWorkflow(approver.GetDbId(),
+                                var workflowDbId = await Workflow.WexflowEngine.SaveWorkflow(approver.GetDbId(),
                                     approver.UserProfile, xml, false);
 
                                 if (workflowDbId != "-1")
@@ -84,7 +86,8 @@ namespace Wexflow.Tasks.ApprovalWorkflowsCreator
                                             "Workflow_" + workflowId + ".xml");
                                         var xdoc = XDocument.Parse(xml);
                                         xdoc.Save(filePath);
-                                        Thread.Sleep(5 * 1000); // Wait until the workflow get reloaded in the system
+                                        // Wait until the workflow get reloaded in the system
+                                        await System.Threading.Tasks.Task.Delay(5 * 1000, Workflow.CancellationTokenSource.Token);
                                         workflow = Workflow.WexflowEngine
                                             .GetWorkflow(workflowId); // Reload the workflow
                                     }
@@ -104,7 +107,7 @@ namespace Wexflow.Tasks.ApprovalWorkflowsCreator
                                     success = false;
                                 }
                             }
-                            catch (ThreadInterruptedException)
+                            catch (OperationCanceledException)
                             {
                                 throw;
                             }
@@ -116,13 +119,16 @@ namespace Wexflow.Tasks.ApprovalWorkflowsCreator
                             }
                             finally
                             {
-                                WaitOne();
+                                if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                                {
+                                    WaitOne();
+                                }
                             }
                         }
                     }
                 }
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }

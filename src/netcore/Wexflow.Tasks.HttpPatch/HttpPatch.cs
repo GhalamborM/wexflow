@@ -33,15 +33,19 @@ namespace Wexflow.Tasks.HttpPatch
 
         public override TaskStatus Run()
         {
+            Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
             Info("Executing PATCH request...");
             var status = Status.Success;
             try
             {
-                using HttpClient client = new();
+                Workflow.CancellationTokenSource.Token.ThrowIfCancellationRequested();
+                var handler = new HttpClientHandler
+                {
+                    SslProtocols = SslProtocols.Tls12,
+                    AllowAutoRedirect = true
+                };
+                using HttpClient client = new(handler);
                 using StringContent httpContent = new(Payload, Encoding.UTF8, Type);
-
-                ServicePointManager.Expect100Continue = true;
-                ServicePointManager.SecurityProtocol = TLS12;
 
                 if (!string.IsNullOrEmpty(AuthorizationScheme) && !string.IsNullOrEmpty(AuthorizationParameter))
                 {
@@ -57,7 +61,7 @@ namespace Wexflow.Tasks.HttpPatch
                 Files.Add(new FileInf(destFile, Id));
                 InfoFormat("PATCH request {0} executed whith success -> {1}", Url, destFile);
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
                 throw;
             }
@@ -68,7 +72,10 @@ namespace Wexflow.Tasks.HttpPatch
             }
             finally
             {
-                WaitOne();
+                if (!Workflow.CancellationTokenSource.Token.IsCancellationRequested)
+                {
+                    WaitOne();
+                }
             }
             Info("Task finished.");
             return new TaskStatus(status);

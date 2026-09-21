@@ -1,10 +1,9 @@
-﻿using System;
+using System;
 using System.Configuration;
 using System.Diagnostics;
 using System.IO;
-using System.Security.Cryptography;
-using System.Text;
 using System.Windows.Forms;
+using Wexflow.Core.Auth;
 using Wexflow.Core.Service.Client;
 using Wexflow.Core.Service.Contracts;
 
@@ -18,6 +17,7 @@ namespace Wexflow.Clients.Manager
 
         public static string Username = "";
         public static string Password = "";
+        public static string Token = "";
 
         private readonly WexflowServiceClient _wexflowServiceClient;
 
@@ -53,8 +53,21 @@ namespace Wexflow.Clients.Manager
                 }
                 else
                 {
+                    string token;
+                    User user;
                     var password = txtPassword.Text;
-                    var user = _wexflowServiceClient.GetUser(username, password, username);
+                    try
+                    {
+                        token = _wexflowServiceClient.Login(username, password, true);
+                        Token = token;
+                    }
+                    catch (Exception)
+                    {
+                        _ = MessageBox.Show(@"Wrong credentials.");
+                        return;
+                    }
+
+                    user = _wexflowServiceClient.GetUser(username, token);
 
                     if (user == null)
                     {
@@ -68,7 +81,7 @@ namespace Wexflow.Clients.Manager
                         }
                         else
                         {
-                            if (user.Password == GetMd5(password))
+                            if (PasswordHasher.VerifyPassword(password, user.Password))
                             {
                                 Username = user.Username;
                                 Password = password;
@@ -88,25 +101,6 @@ namespace Wexflow.Clients.Manager
             catch (Exception)
             {
                 _ = MessageBox.Show(@"An error occured during the authentication.", @"Wexflow", MessageBoxButtons.OK);
-            }
-        }
-
-        public static string GetMd5(string input)
-        {
-            // Use input string to calculate MD5 hash
-            using (var md5 = MD5.Create())
-            {
-                var inputBytes = Encoding.ASCII.GetBytes(input);
-                var hashBytes = md5.ComputeHash(inputBytes);
-
-                // Convert the byte array to hexadecimal string
-                var sb = new StringBuilder();
-                // ReSharper disable once ForCanBeConvertedToForeach
-                for (var i = 0; i < hashBytes.Length; i++)
-                {
-                    _ = sb.Append(hashBytes[i].ToString("x2"));
-                }
-                return sb.ToString();
             }
         }
 

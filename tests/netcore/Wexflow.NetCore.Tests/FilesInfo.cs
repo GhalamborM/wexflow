@@ -24,13 +24,14 @@ namespace Wexflow.NetCore.Tests
             Helper.DeleteFiles(FilesInfoFolder);
             FileInfo info1 = new(File1);
             FileInfo info2 = new(File2);
-            _expectedResult = string.Format(_expectedResult
-                , info1.CreationTime.ToString(dateFormat)
-                , info1.LastWriteTime.ToString(dateFormat)
-                , info1.LastAccessTime.ToString(dateFormat)
-                , info2.CreationTime.ToString(dateFormat)
-                , info2.LastWriteTime.ToString(dateFormat)
-                , info2.LastAccessTime.ToString(dateFormat));
+            _expectedResult = string.Format(
+                _expectedResult,
+                info1.CreationTime.ToString(dateFormat),
+                info1.LastWriteTime.ToString(dateFormat),
+                info1.LastAccessTime.ToString(dateFormat),
+                info2.CreationTime.ToString(dateFormat),
+                info2.LastWriteTime.ToString(dateFormat),
+                info2.LastAccessTime.ToString(dateFormat));
         }
 
         [TestCleanup]
@@ -40,11 +41,11 @@ namespace Wexflow.NetCore.Tests
         }
 
         [TestMethod]
-        public void FilesInfoTest()
+        public async System.Threading.Tasks.Task FilesInfoTest()
         {
             var files = GetFiles();
             Assert.AreEqual(0, files.Length);
-            _ = Helper.StartWorkflow(54);
+            _ = await Helper.StartWorkflow(54);
             files = GetFiles();
             Assert.AreEqual(1, files.Length);
             var content = File.ReadAllText(files[0]);

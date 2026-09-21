@@ -1,12 +1,15 @@
-﻿using System;
+using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Linq;
 using System.Xml.Schema;
@@ -22,6 +25,8 @@ namespace Wexflow.Core
     /// </summary>
     public class Workflow
     {
+        private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
+
         /// <summary>
         /// This constant is used to determine the key size of the encryption algorithm in bits.
         /// We divide this by 8 within the code below to get the equivalent number of bytes.
@@ -41,6 +46,7 @@ namespace Wexflow.Core
         /// </summary>
         public const int START_ID = -1;
 
+        #region Properties
         /// <summary>
         /// Wexflow engine.
         /// </summary>
@@ -194,9 +200,9 @@ namespace Wexflow.Core
         /// </summary>
         public Db.Db Database { get; }
         /// <summary>
-        /// Global variables.
+        /// Global variables file path.
         /// </summary>
-        public Variable[] GlobalVariables { get; }
+        public string GlobalVariablesFile { get; }
         /// <summary>
         /// Local variables.
         /// </summary>
@@ -212,7 +218,7 @@ namespace Wexflow.Core
         /// <summary>
         /// Workflow jobs.
         /// </summary>
-        public Dictionary<Guid, Workflow> Jobs { get; }
+        public ConcurrentDictionary<Guid, Workflow> Jobs { get; }
         /// <summary>
         /// Instance Id.
         /// </summary>
@@ -233,6 +239,11 @@ namespace Wexflow.Core
         /// The retry timeout between two tries. Default is 1500ms.
         /// </summary>
         public int RetryTimeout { get; private set; }
+        /// <summary>
+        /// Job Status.
+        /// </summary>
+        public Db.Status JobStatus { get; private set; }
+        #endregion
 
         private readonly Queue<Job> _jobsQueue;
         private Thread _thread;
@@ -252,11 +263,11 @@ namespace Wexflow.Core
         /// <param name="approvalFolder">Approval folder.</param>
         /// <param name="xsdPath">XSD path.</param>
         /// <param name="database">Database.</param>
-        /// <param name="globalVariables">Global variables.</param>
+        /// <param name="globalVariablesFile">Global variables file path.</param>
         public Workflow(
               WexflowEngine wexflowEngine
             , int jobId
-            , Dictionary<Guid, Workflow> jobs
+            , ConcurrentDictionary<Guid, Workflow> jobs
             , string dbId
             , string xml
             , string wexflowTempFolder
@@ -264,7 +275,7 @@ namespace Wexflow.Core
             , string approvalFolder
             , string xsdPath
             , Db.Db database
-            , Variable[] globalVariables)
+            , string globalVariablesFile)
         {
             WexflowEngine = wexflowEngine;
             Logs = new List<string>();
@@ -283,7 +294,7 @@ namespace Wexflow.Core
             FilesPerTask = new Dictionary<int, List<FileInf>>();
             EntitiesPerTask = new Dictionary<int, List<Entity>>();
             SharedMemory = new Hashtable();
-            GlobalVariables = globalVariables;
+            GlobalVariablesFile = globalVariablesFile;
             RestVariables = new List<Variable>();
             StartedOn = DateTime.MinValue;
             Check();
@@ -323,6 +334,24 @@ namespace Wexflow.Core
             }
         }
 
+        private List<Variable> LoadGlobalVariables()
+        {
+            var variables = new List<Variable>();
+            var xdoc = XDocument.Load(GlobalVariablesFile);
+
+            foreach (var xvariable in xdoc.Descendants("Variable"))
+            {
+                var variable = new Variable
+                {
+                    Key = (xvariable.Attribute("name") ?? throw new InvalidOperationException("name attribute of global variable not found")).Value,
+                    Value = (xvariable.Attribute("value") ?? throw new InvalidOperationException("value attribute of global variable not found")).Value
+                };
+                variables.Add(variable);
+            }
+
+            return variables;
+        }
+
         private void LoadLocalVariables()
         {
             using (var xmlReader = XmlReader.Create(new StringReader(Xml)))
@@ -360,22 +389,51 @@ namespace Wexflow.Core
             }
         }
 
+        private string EncodeXml(string val)
+        {
+            return SecurityElement.Escape(val);
+        }
+
         private string Parse(string src)
         {
             string dest;
 
             //
-            // Parse global variables.
+            // Parse functions.
+            // $DateTime(): current unix timestamp in milliseconds
+            // $Guid(): new Guid
             //
             using (var sr = new StringReader(src))
+            using (var sw = new StringWriter())
+            {
+                long unixTimestampMilliseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                string line;
+                while ((line = sr.ReadLine()) != null)
+                {
+                    line = line.Replace("$DateTime()", unixTimestampMilliseconds.ToString());
+                    line = line.Replace("$Guid()", Guid.NewGuid().ToString());
+                    sw.WriteLine(line);
+                }
+                dest = sw.ToString();
+            }
+
+            //
+            // Load global variables.
+            //
+            var globalVariables = LoadGlobalVariables();
+
+            //
+            // Parse global variables.
+            //
+            using (var sr = new StringReader(dest))
             using (var sw = new StringWriter())
             {
                 string line;
                 while ((line = sr.ReadLine()) != null)
                 {
-                    foreach (var variable in GlobalVariables)
+                    foreach (var variable in globalVariables)
                     {
-                        line = line.Replace($"${variable.Key}", variable.Value);
+                        line = line.Replace($"${variable.Key}", EncodeXml(variable.Value));
                     }
                     sw.WriteLine(line);
                 }
@@ -439,7 +497,7 @@ namespace Wexflow.Core
                     }
                     foreach (var variable in localVariablesParsed)
                     {
-                        line = line.Replace($"${variable.Key}", variable.Value);
+                        line = line.Replace($"${variable.Key}", EncodeXml(variable.Value));
                     }
                     sw.WriteLine(line);
                 }
@@ -460,7 +518,7 @@ namespace Wexflow.Core
                     {
                         if (variable != null)
                         {
-                            line = line.Replace("$" + variable.Key, variable.Value);
+                            line = line.Replace("$" + variable.Key, EncodeXml(variable.Value));
                         }
                     }
                     sw.WriteLine(line);
@@ -582,7 +640,7 @@ namespace Wexflow.Core
                     var taskNodes = GetTaskNodes(xExectionGraph);
 
                     // Check startup node, parallel tasks and infinite loops
-                    if (taskNodes.Any())
+                    if (taskNodes.Length != 0)
                     {
                         CheckStartupNode(taskNodes, "Startup node with parentId=-1 not found in ExecutionGraph execution graph.");
                     }
@@ -645,126 +703,27 @@ namespace Wexflow.Core
 
         private Node[] GetTaskNodes(XElement xExectionGraph)
         {
-            var nodes = xExectionGraph
+            int depth = 0;
+            var xNodes = xExectionGraph
                 .Elements()
                 .Where(xe => xe.Name.LocalName != "OnSuccess" && xe.Name.LocalName != "OnWarning" && xe.Name.LocalName != "OnError" && xe.Name.LocalName != "OnRejected")
-                .Select(XNodeToNode)
                 .ToArray();
 
+            var nodesList = new List<Node>();
+            foreach (var xNode in xNodes)
+            {
+                var node = XNodeToNode(xNode, ref depth);
+                nodesList.Add(node);
+            }
+
+            var nodes = nodesList.ToArray();
             return nodes;
         }
 
-        private If XIfToIf(XElement xIf)
+        private Node XNodeToNode(XElement xNode, ref int depth)
         {
-            var xId = xIf.Attribute("id") ?? throw new Exception("If id attribute not found.");
-            var id = int.Parse(xId.Value);
-            var xParent = xIf.Attribute("parent") ?? throw new Exception("If parent attribute not found.");
-            var parentId = int.Parse(xParent.Value);
-            var xIfId = xIf.Attribute("if") ?? throw new Exception("If attribute not found.");
-            var ifId = int.Parse(xIfId.Value);
+            int currentDepth = depth; // Copy current depth by value to get depth at each level
 
-            // Do nodes
-            var doNodes = (xIf.XPathSelectElement("wf:Do", XmlNamespaceManager) ?? throw new InvalidOperationException("wf:Do not found"))
-                .Elements()
-                .Select(XNodeToNode)
-                .ToArray();
-
-            CheckStartupNode(doNodes, "Startup node with parentId=-1 not found in DoIf>Do execution graph.");
-            CheckParallelTasks(doNodes, "Parallel tasks execution detected in DoIf>Do execution graph.");
-            CheckInfiniteLoop(doNodes, "Infinite loop detected in DoIf>Do execution graph.");
-
-            // Otherwise nodes
-            Node[] elseNodes = null;
-            var xElse = xIf.XPathSelectElement("wf:Else", XmlNamespaceManager);
-            if (xElse != null)
-            {
-                elseNodes = xElse
-                    .Elements()
-                    .Select(XNodeToNode)
-                    .ToArray();
-
-                CheckStartupNode(elseNodes, "Startup node with parentId=-1 not found in DoIf>Otherwise execution graph.");
-                CheckParallelTasks(elseNodes, "Parallel tasks execution detected in DoIf>Otherwise execution graph.");
-                CheckInfiniteLoop(elseNodes, "Infinite loop detected in DoIf>Otherwise execution graph.");
-            }
-
-            return new If(id, parentId, ifId, doNodes, elseNodes);
-        }
-
-        private While XWhileToWhile(XElement xWhile)
-        {
-            var xId = xWhile.Attribute("id") ?? throw new Exception("While Id attribute not found.");
-            var id = int.Parse(xId.Value);
-            var xParent = xWhile.Attribute("parent") ?? throw new Exception("While parent attribute not found.");
-            var parentId = int.Parse(xParent.Value);
-            var xWhileId = xWhile.Attribute("while") ?? throw new Exception("While attribute not found.");
-            var whileId = int.Parse(xWhileId.Value);
-
-            var doNodes = xWhile
-                .Elements()
-                .Select(XNodeToNode)
-                .ToArray();
-
-            CheckStartupNode(doNodes, "Startup node with parentId=-1 not found in DoWhile>Do execution graph.");
-            CheckParallelTasks(doNodes, "Parallel tasks execution detected in DoWhile>Do execution graph.");
-            CheckInfiniteLoop(doNodes, "Infinite loop detected in DoWhile>Do execution graph.");
-
-            return new While(id, parentId, whileId, doNodes);
-        }
-
-        private Switch XSwitchToSwitch(XElement xSwitch)
-        {
-            var xId = xSwitch.Attribute("id") ?? throw new Exception("Switch Id attribute not found.");
-            var id = int.Parse(xId.Value);
-            var xParent = xSwitch.Attribute("parent") ?? throw new Exception("Switch parent attribute not found.");
-            var parentId = int.Parse(xParent.Value);
-            var xSwitchId = xSwitch.Attribute("switch") ?? throw new Exception("Switch attribute not found.");
-            var switchId = int.Parse(xSwitchId.Value);
-
-            var cases = xSwitch
-                .XPathSelectElements("wf:Case", XmlNamespaceManager)
-                .Select(xCase =>
-                {
-                    var xValue = xCase.Attribute("value") ?? throw new Exception("Case value attribute not found.");
-                    var val = xValue.Value;
-
-                    var nodes = xCase
-                        .Elements()
-                        .Select(XNodeToNode)
-                        .ToArray();
-
-                    var nodeName = $"Switch>Case(value={val})";
-                    CheckStartupNode(nodes, $"Startup node with parentId=-1 not found in {nodeName} execution graph.");
-                    CheckParallelTasks(nodes, $"Parallel tasks execution detected in {nodeName} execution graph.");
-                    CheckInfiniteLoop(nodes, $"Infinite loop detected in {nodeName} execution graph.");
-
-                    return new Case(val, nodes);
-                });
-
-            var xDefault = xSwitch.XPathSelectElement("wf:Default", XmlNamespaceManager);
-            if (xDefault == null)
-            {
-                return new Switch(id, parentId, switchId, cases, null);
-            }
-
-            var @default = xDefault
-                .Elements()
-                .Select(XNodeToNode)
-                .ToArray();
-
-            if (@default.Length > 0)
-            {
-                CheckStartupNode(@default,
-                    "Startup node with parentId=-1 not found in Switch>Default execution graph.");
-                CheckParallelTasks(@default, "Parallel tasks execution detected in Switch>Default execution graph.");
-                CheckInfiniteLoop(@default, "Infinite loop detected in Switch>Default execution graph.");
-            }
-
-            return new Switch(id, parentId, switchId, cases, @default);
-        }
-
-        private Node XNodeToNode(XElement xNode)
-        {
             switch (xNode.Name.LocalName)
             {
                 case "Task":
@@ -775,17 +734,162 @@ namespace Wexflow.Core
                         .Attribute("id") ?? throw new Exception("Parent id not found.");
                     var parentId = int.Parse(xParentId.Value);
 
-                    var node = new Node(id, parentId);
+                    Node node = new Node(id, parentId, currentDepth);
                     return node;
                 case "If":
-                    return XIfToIf(xNode);
+                    return XIfToIf(xNode, ref depth);
                 case "While":
-                    return XWhileToWhile(xNode);
+                    return XWhileToWhile(xNode, ref depth);
                 case "Switch":
-                    return XSwitchToSwitch(xNode);
+                    return XSwitchToSwitch(xNode, ref depth);
                 default:
                     throw new Exception(xNode.Name.LocalName + " is not supported.");
             }
+        }
+
+        private If XIfToIf(XElement xIf, ref int depth)
+        {
+            int currentDepth = depth; // current depth
+
+            depth++;
+
+            var xId = xIf.Attribute("id") ?? throw new Exception("If id attribute not found.");
+            var id = int.Parse(xId.Value);
+            var xParent = xIf.Attribute("parent") ?? throw new Exception("If parent attribute not found.");
+            var parentId = int.Parse(xParent.Value);
+            var xIfId = xIf.Attribute("if") ?? throw new Exception("If attribute not found.");
+            var ifId = int.Parse(xIfId.Value);
+
+            // Do nodes
+            var xNodes = (xIf.XPathSelectElement("wf:Do", XmlNamespaceManager) ?? throw new InvalidOperationException("wf:Do not found"))
+              .Elements();
+            var doNodesList = new List<Node>();
+            foreach (var xNode in xNodes)
+            {
+                var node = XNodeToNode(xNode, ref depth);
+                doNodesList.Add(node);
+            }
+            var doNodes = doNodesList.ToArray();
+
+            CheckStartupNode(doNodes, "Startup node with parentId=-1 not found in DoIf>Do execution graph.");
+            CheckParallelTasks(doNodes, "Parallel tasks execution detected in DoIf>Do execution graph.");
+            CheckInfiniteLoop(doNodes, "Infinite loop detected in DoIf>Do execution graph.");
+
+            // Otherwise nodes
+            Node[] elseNodes = null;
+            var xElse = xIf.XPathSelectElement("wf:Else", XmlNamespaceManager);
+            if (xElse != null)
+            {
+                var elseNodesList = new List<Node>();
+                var xElseNodes = xElse.Elements();
+                foreach (var xNode in xElseNodes)
+                {
+                    var node = XNodeToNode(xNode, ref depth);
+                    elseNodesList.Add(node);
+                }
+                elseNodes = elseNodesList.ToArray();
+
+                CheckStartupNode(elseNodes, "Startup node with parentId=-1 not found in DoIf>Otherwise execution graph.");
+                CheckParallelTasks(elseNodes, "Parallel tasks execution detected in DoIf>Otherwise execution graph.");
+                CheckInfiniteLoop(elseNodes, "Infinite loop detected in DoIf>Otherwise execution graph.");
+            }
+
+            return new If(id, parentId, ifId, doNodes, elseNodes, currentDepth);
+        }
+
+        private While XWhileToWhile(XElement xWhile, ref int depth)
+        {
+            int currentDepth = depth; // current depth
+
+            depth++;
+
+            var xId = xWhile.Attribute("id") ?? throw new Exception("While Id attribute not found.");
+            var id = int.Parse(xId.Value);
+            var xParent = xWhile.Attribute("parent") ?? throw new Exception("While parent attribute not found.");
+            var parentId = int.Parse(xParent.Value);
+            var xWhileId = xWhile.Attribute("while") ?? throw new Exception("While attribute not found.");
+            var whileId = int.Parse(xWhileId.Value);
+
+            var xNodes = xWhile.Elements();
+            var nodesList = new List<Node>();
+            foreach (var xNode in xNodes)
+            {
+                var node = XNodeToNode(xNode, ref depth);
+                nodesList.Add(node);
+            }
+            var doNodes = nodesList.ToArray();
+
+            CheckStartupNode(doNodes, "Startup node with parentId=-1 not found in DoWhile>Do execution graph.");
+            CheckParallelTasks(doNodes, "Parallel tasks execution detected in DoWhile>Do execution graph.");
+            CheckInfiniteLoop(doNodes, "Infinite loop detected in DoWhile>Do execution graph.");
+
+            return new While(id, parentId, whileId, doNodes, currentDepth);
+        }
+
+        private Switch XSwitchToSwitch(XElement xSwitch, ref int depth)
+        {
+            int currentDepth = depth; // current depth
+
+            depth++;
+
+            var xId = xSwitch.Attribute("id") ?? throw new Exception("Switch Id attribute not found.");
+            var id = int.Parse(xId.Value);
+            var xParent = xSwitch.Attribute("parent") ?? throw new Exception("Switch parent attribute not found.");
+            var parentId = int.Parse(xParent.Value);
+            var xSwitchId = xSwitch.Attribute("switch") ?? throw new Exception("Switch attribute not found.");
+            var switchId = int.Parse(xSwitchId.Value);
+
+            var xCases = xSwitch.XPathSelectElements("wf:Case", XmlNamespaceManager);
+            var casesList = new List<Case>();
+
+            foreach (var xCase in xCases)
+            {
+                var xValue = xCase.Attribute("value") ?? throw new Exception("Case value attribute not found.");
+                var val = xValue.Value;
+
+                var xNodes = xCase.Elements();
+                var nodesList = new List<Node>();
+                foreach (var xNode in xNodes)
+                {
+                    var node = XNodeToNode(xNode, ref depth);
+                    nodesList.Add(node);
+                }
+                var nodes = nodesList.ToArray();
+
+                var nodeName = $"Switch>Case(value={val})";
+                CheckStartupNode(nodes, $"Startup node with parentId=-1 not found in {nodeName} execution graph.");
+                CheckParallelTasks(nodes, $"Parallel tasks execution detected in {nodeName} execution graph.");
+                CheckInfiniteLoop(nodes, $"Infinite loop detected in {nodeName} execution graph.");
+
+                var caseNode = new Case(val, nodes);
+                casesList.Add(caseNode);
+            }
+            var cases = casesList.ToArray();
+
+            var xDefault = xSwitch.XPathSelectElement("wf:Default", XmlNamespaceManager);
+            if (xDefault == null)
+            {
+                return new Switch(id, parentId, switchId, cases, null, currentDepth);
+            }
+
+            var xDefaultNodes = xDefault.Elements();
+            var defaultNodesList = new List<Node>();
+            foreach (var xNode in xDefaultNodes)
+            {
+                var node = XNodeToNode(xNode, ref depth);
+                defaultNodesList.Add(node);
+            }
+            var @default = defaultNodesList.ToArray();
+
+            if (@default.Length > 0)
+            {
+                CheckStartupNode(@default,
+                    "Startup node with parentId=-1 not found in Switch>Default execution graph.");
+                CheckParallelTasks(@default, "Parallel tasks execution detected in Switch>Default execution graph.");
+                CheckInfiniteLoop(@default, "Infinite loop detected in Switch>Default execution graph.");
+            }
+
+            return new Switch(id, parentId, switchId, cases, @default, currentDepth);
         }
 
         private void CheckStartupNode(Node[] nodes, string errorMsg)
@@ -893,188 +997,218 @@ namespace Wexflow.Core
             return string.Empty;
         }
 
+        private List<Variable> CloneVariables(List<Variable> variables)
+        {
+            var clonedVariables = new List<Variable>();
+
+            if (variables == null || variables.Count == 0)
+            {
+                return clonedVariables;
+            }
+
+            foreach (var variable in variables)
+            {
+                clonedVariables.Add(new Variable
+                {
+                    Key = variable.Key,
+                    Value = variable.Value
+                });
+            }
+            return clonedVariables;
+        }
+
         /// <summary>
         /// Starts this workflow asynchronously.
         /// </summary>
         /// <param name="startedBy">Username of the user that started the workflow.</param>
-        /// <returns>Instance Id.</returns>
-        public Guid StartAsync(string startedBy)
+        /// <param name="restVariables">Optional REST variables.</param>
+        /// <returns>A task that resolves to the workflow instance ID, or <see cref="Guid.Empty"/> if queued.</returns>
+        public async System.Threading.Tasks.Task<Guid> StartAsync(string startedBy, List<Variable> restVariables = null)
         {
             if (IsRunning && !EnableParallelJobs)
             {
                 StartedBy = startedBy;
-                var job = new Job { Workflow = this, QueuedOn = DateTime.Now };
+                var job = new Job() { Workflow = this, QueuedOn = DateTime.Now };
                 _jobsQueue.Enqueue(job);
                 return Guid.Empty;
             }
-            else if (IsRunning && EnableParallelJobs)
+
+            if (IsRunning && EnableParallelJobs)
             {
-                var workflow = new Workflow(
-                      WexflowEngine
-                    , ++ParallelJobId
-                    , Jobs
-                    , DbId
-                    , Xml
-                    , WexflowTempFolder
-                    , TasksFolder
-                    , ApprovalFolder
-                    , XsdPath
-                    , Database
-                    , GlobalVariables
-                    )
+                var parallelWorkflow = new Workflow(
+                    WexflowEngine,
+                    ++ParallelJobId,
+                    Jobs,
+                    DbId,
+                    Xml,
+                    WexflowTempFolder,
+                    TasksFolder,
+                    ApprovalFolder,
+                    XsdPath,
+                    Database,
+                    GlobalVariablesFile)
                 {
-                    RestVariables = RestVariables,
+                    RestVariables = CloneVariables(RestVariables),
                     StartedBy = startedBy
                 };
-                return workflow.StartAsync(startedBy);
+
+                return await parallelWorkflow.StartAsync(startedBy, restVariables);
             }
 
             StartedOn = DateTime.Now;
             StartedBy = startedBy;
             var instanceId = Guid.NewGuid();
-            var warning = false;
-            var thread = new Thread(() => StartSync(startedBy, instanceId, ref warning));
-            _thread = thread;
-            thread.Start();
+            _thread = null;
+
+            // LEGACY THREAD-BASED VERSION
+            // Used to capture the thread for support with Thread.Interrupt() in Stop() method.
+            // Note: This approach is only suitable for legacy scenarios (e.g., .NET Framework / compatibility mode).
+            _thread = new Thread(() =>
+            {
+                try
+                {
+                    // Block the thread and run the workflow synchronously (async bridge).
+                    var warning = false;
+                    StartInternalAsync(startedBy, instanceId, warning, restVariables).GetAwaiter().GetResult();
+                }
+                catch (ThreadInterruptedException)
+                {
+                    // Graceful exit when workflow is stopped using Thread.Interrupt()
+                }
+            });
+
+            _thread.Start();
+
 
             return instanceId;
         }
 
         /// <summary>
-        /// Starts this workflow synchronously.
+        /// Starts this workflow asynchronously (internal logic).
         /// </summary>
         /// <param name="startedBy">Username of the user that started the workflow.</param>
-        /// <param name="instanceId">Instance id.</param>
-        /// <param name="resultWarning">Indicates whether the final result is warning or not.</param>
-        public bool StartSync(string startedBy, Guid instanceId, ref bool resultWarning)
+        /// <param name="instanceId">Workflow instance ID.</param>
+        /// <param name="resultWarning">Set to true if workflow finishes with a warning.</param>
+        /// <param name="restVariables">REST variables passed to the workflow.</param>
+        /// <returns>True if the workflow completed successfully; otherwise false.</returns>
+        public async System.Threading.Tasks.Task<bool> StartInternalAsync(
+            string startedBy,
+            Guid instanceId,
+            bool resultWarning,
+            List<Variable> restVariables = null)
         {
-            var resultSuccess = true;
-
-            StartedOn = DateTime.Now;
-            StartedBy = startedBy;
-            InstanceId = instanceId;
-            Jobs.Add(InstanceId, this);
-
-            //
-            // Parse the workflow definition (Global variables and local variables.)
-            //
-            var dest = Parse(Xml);
-            Load(dest);
-
-            _stopCalled = false;
-
-            Logs.Clear();
-
-            if (WexflowEngine.LogLevel != LogLevel.None)
+            if (IsRunning)
             {
-                var msg = $"{LogTag} Workflow started - Instance Id: {InstanceId}";
-                Logger.Info(msg);
-                Logs.Add($"{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture)}  INFO - {msg}");
-            }
-
-            Database.IncrementRunningCount();
-
-            var entry = Database.GetEntry(Id, InstanceId);
-            if (entry == null)
-            {
-                var newEntry = new Entry
+                if (EnableParallelJobs)
                 {
-                    WorkflowId = Id,
-                    JobId = InstanceId.ToString(),
-                    Name = Name,
-                    LaunchType = (Db.LaunchType)(int)LaunchType,
-                    Description = Description,
-                    Status = Db.Status.Running,
-                    StatusDate = DateTime.Now,
-                    Logs = string.Join("\r\n", Logs)
-                };
-                Database.InsertEntry(newEntry);
-            }
-            else
-            {
-                entry.Status = Db.Status.Running;
-                entry.StatusDate = DateTime.Now;
-                entry.Logs = string.Join("\r\n", Logs);
-                Database.UpdateEntry(entry.GetDbId(), entry);
-            }
-            entry = Database.GetEntry(Id, InstanceId);
-
-            _historyEntry = new HistoryEntry
-            {
-                WorkflowId = Id,
-                Name = Name,
-                LaunchType = (Db.LaunchType)(int)LaunchType,
-                Description = Description
-            };
-
-            try
-            {
-                IsRunning = true;
-                IsRejected = false;
-
-                // Create the temp folder
-                CreateTempFolder();
-
-                // Run the tasks
-                if (ExecutionGraph == null)
-                {
-                    var success = true;
+                    var pInstanceId = Guid.NewGuid();
                     var warning = false;
-                    var error = true;
-                    RunSequentialTasks(Tasks, ref success, ref warning, ref error);
 
-                    if (!_stopCalled)
+                    var parallelWorkflow = new Workflow(
+                        WexflowEngine,
+                        ++ParallelJobId,
+                        Jobs,
+                        DbId,
+                        Xml,
+                        WexflowTempFolder,
+                        TasksFolder,
+                        ApprovalFolder,
+                        XsdPath,
+                        Database,
+                        GlobalVariablesFile)
                     {
-                        if (IsRejected)
-                        {
-                            LogWorkflowFinished();
-                            Database.IncrementRejectedCount();
-                            entry.Status = Db.Status.Rejected;
-                            entry.StatusDate = DateTime.Now;
-                            entry.Logs = string.Join("\r\n", Logs);
-                            Database.UpdateEntry(entry.GetDbId(), entry);
-                            _historyEntry.Status = Db.Status.Rejected;
-                        }
-                        else
-                        {
-                            if (success)
-                            {
-                                LogWorkflowFinished();
-                                Database.IncrementDoneCount();
-                                entry.Status = Db.Status.Done;
-                                entry.StatusDate = DateTime.Now;
-                                entry.Logs = string.Join("\r\n", Logs);
-                                Database.UpdateEntry(entry.GetDbId(), entry);
-                                _historyEntry.Status = Db.Status.Done;
-                            }
-                            else if (warning)
-                            {
-                                LogWorkflowFinished();
-                                Database.IncrementWarningCount();
-                                entry.Status = Db.Status.Warning;
-                                entry.StatusDate = DateTime.Now;
-                                entry.Logs = string.Join("\r\n", Logs);
-                                Database.UpdateEntry(entry.GetDbId(), entry);
-                                _historyEntry.Status = Db.Status.Warning;
-                                resultWarning = true;
-                            }
-                            else if (error)
-                            {
-                                LogWorkflowFinished();
-                                Database.IncrementFailedCount();
-                                entry.Status = Db.Status.Failed;
-                                entry.StatusDate = DateTime.Now;
-                                entry.Logs = string.Join("\r\n", Logs);
-                                Database.UpdateEntry(entry.GetDbId(), entry);
-                                _historyEntry.Status = Db.Status.Failed;
-                                resultSuccess = false;
-                            }
-                        }
-                    }
+                        RestVariables = CloneVariables(RestVariables),
+                        StartedBy = startedBy
+                    };
+
+                    return await parallelWorkflow.StartInternalAsync(startedBy, pInstanceId, warning, restVariables);
                 }
                 else
                 {
-                    var status = RunTasks(ExecutionGraph.Nodes, Tasks, false);
+                    var job = new Job() { Workflow = this, QueuedOn = DateTime.Now };
+                    _jobsQueue.Enqueue(job);
+                    return true;
+                }
+            }
+
+            await _semaphore.WaitAsync();
+
+            var result = new RunResult();
+
+            JobStatus = Db.Status.Running;
+
+            try
+            {
+                StartedOn = DateTime.Now;
+                StartedBy = startedBy;
+                InstanceId = instanceId;
+                Jobs.TryAdd(InstanceId, this);
+
+                if (restVariables != null)
+                {
+                    RestVariables.Clear();
+                    RestVariables.AddRange(restVariables);
+                }
+
+                var dest = Parse(Xml);
+                Load(dest);
+
+                _stopCalled = false;
+                Logs.Clear();
+
+                if (WexflowEngine.LogLevel != LogLevel.None)
+                {
+                    var msg = $"{LogTag} Workflow started - Instance Id: {InstanceId}";
+                    Logger.Info(msg);
+                    Logs.Add($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  INFO - {msg}");
+                }
+
+                Database.IncrementRunningCount();
+
+                var entry = Database.GetEntry(Id, InstanceId);
+                if (entry == null)
+                {
+                    entry = new Entry
+                    {
+                        WorkflowId = Id,
+                        JobId = InstanceId.ToString(),
+                        Name = Name,
+                        LaunchType = (Db.LaunchType)(int)LaunchType,
+                        Description = Description,
+                        Status = Db.Status.Running,
+                        StatusDate = DateTime.Now,
+                        Logs = string.Join("\r\n", Logs)
+                    };
+                    Database.InsertEntry(entry);
+                }
+                else
+                {
+                    entry.Status = Db.Status.Running;
+                    entry.StatusDate = DateTime.Now;
+                    entry.Logs = string.Join("\r\n", Logs);
+                    Database.UpdateEntry(entry.GetDbId(), entry);
+                }
+
+                _historyEntry = new HistoryEntry
+                {
+                    WorkflowId = Id,
+                    Name = Name,
+                    LaunchType = (Db.LaunchType)(int)LaunchType,
+                    Description = Description
+                };
+
+
+                IsRunning = true;
+                IsRejected = false;
+                CreateTempFolder();
+
+                if (ExecutionGraph == null)
+                {
+                    await RunSequentialTasksAsync(Tasks, result);
+                }
+                else
+                {
+                    var status = await RunTasksAsync(ExecutionGraph.Nodes, Tasks, false);
 
                     if (!_stopCalled)
                     {
@@ -1084,59 +1218,31 @@ namespace Wexflow.Core
                                 if (ExecutionGraph.OnSuccess != null)
                                 {
                                     var successTasks = NodesToTasks(ExecutionGraph.OnSuccess.Nodes);
-                                    _ = RunTasks(ExecutionGraph.OnSuccess.Nodes, successTasks, false);
+                                    await RunTasksAsync(ExecutionGraph.OnSuccess.Nodes, successTasks, false);
                                 }
-                                LogWorkflowFinished();
-                                Database.IncrementDoneCount();
-                                entry.Status = Db.Status.Done;
-                                entry.StatusDate = DateTime.Now;
-                                entry.Logs = string.Join("\r\n", Logs);
-                                Database.UpdateEntry(entry.GetDbId(), entry);
-                                _historyEntry.Status = Db.Status.Done;
                                 break;
                             case Status.Warning:
                                 if (ExecutionGraph.OnWarning != null)
                                 {
                                     var warningTasks = NodesToTasks(ExecutionGraph.OnWarning.Nodes);
-                                    _ = RunTasks(ExecutionGraph.OnWarning.Nodes, warningTasks, false);
+                                    await RunTasksAsync(ExecutionGraph.OnWarning.Nodes, warningTasks, false);
                                 }
-                                LogWorkflowFinished();
-                                Database.IncrementWarningCount();
-                                entry.Status = Db.Status.Warning;
-                                entry.StatusDate = DateTime.Now;
-                                entry.Logs = string.Join("\r\n", Logs);
-                                Database.UpdateEntry(entry.GetDbId(), entry);
-                                _historyEntry.Status = Db.Status.Warning;
                                 resultWarning = true;
                                 break;
                             case Status.Error:
                                 if (ExecutionGraph.OnError != null)
                                 {
                                     var errorTasks = NodesToTasks(ExecutionGraph.OnError.Nodes);
-                                    _ = RunTasks(ExecutionGraph.OnError.Nodes, errorTasks, false);
+                                    await RunTasksAsync(ExecutionGraph.OnError.Nodes, errorTasks, false);
                                 }
-                                LogWorkflowFinished();
-                                Database.IncrementFailedCount();
-                                entry.Status = Db.Status.Failed;
-                                entry.StatusDate = DateTime.Now;
-                                entry.Logs = string.Join("\r\n", Logs);
-                                Database.UpdateEntry(entry.GetDbId(), entry);
-                                _historyEntry.Status = Db.Status.Failed;
-                                resultSuccess = false;
+                                result.Success = false;
                                 break;
                             case Status.Rejected:
                                 if (ExecutionGraph.OnRejected != null)
                                 {
                                     var rejectedTasks = NodesToTasks(ExecutionGraph.OnRejected.Nodes);
-                                    _ = RunTasks(ExecutionGraph.OnRejected.Nodes, rejectedTasks, true);
+                                    await RunTasksAsync(ExecutionGraph.OnRejected.Nodes, rejectedTasks, true);
                                 }
-                                LogWorkflowFinished();
-                                Database.IncrementRejectedCount();
-                                entry.Status = Db.Status.Rejected;
-                                entry.StatusDate = DateTime.Now;
-                                entry.Logs = string.Join("\r\n", Logs);
-                                Database.UpdateEntry(entry.GetDbId(), entry);
-                                _historyEntry.Status = Db.Status.Rejected;
                                 break;
                         }
                     }
@@ -1144,58 +1250,110 @@ namespace Wexflow.Core
 
                 if (!_stopCalled)
                 {
+                    LogWorkflowFinished();
+
+                    entry = Database.GetEntry(Id, InstanceId);
+                    entry.StatusDate = DateTime.Now;
+                    entry.Logs = string.Join("\r\n", Logs);
+
+                    if (IsRejected)
+                    {
+                        Database.IncrementRejectedCount();
+                        entry.Status = Db.Status.Rejected;
+                        JobStatus = Db.Status.Rejected;
+                        _historyEntry.Status = Db.Status.Rejected;
+                    }
+                    else if (result.Success)
+                    {
+                        Database.IncrementDoneCount();
+                        entry.Status = Db.Status.Done;
+                        JobStatus = Db.Status.Done;
+                        _historyEntry.Status = Db.Status.Done;
+                    }
+                    else if (result.Warning)
+                    {
+                        Database.IncrementWarningCount();
+                        entry.Status = Db.Status.Warning;
+                        JobStatus = Db.Status.Warning;
+                        _historyEntry.Status = Db.Status.Warning;
+                        resultWarning = true;
+                    }
+                    else
+                    {
+                        Database.IncrementFailedCount();
+                        entry.Status = Db.Status.Failed;
+                        JobStatus = Db.Status.Failed;
+                        _historyEntry.Status = Db.Status.Failed;
+                        result.Success = false;
+                    }
+
+                    Database.UpdateEntry(entry.GetDbId(), entry);
+
                     _historyEntry.StatusDate = DateTime.Now;
-                    _historyEntry.Logs = string.Join("\r\n", Logs);
+                    _historyEntry.Logs = entry.Logs;
                     Database.InsertHistoryEntry(_historyEntry);
                     Database.DecrementRunningCount();
                 }
             }
-            catch (ThreadAbortException)
-            {
-                _stopCalled = true;
-            }
-            catch (Exception e)
+            catch (Exception ex)
             {
                 if (WexflowEngine.LogLevel != LogLevel.None)
                 {
-                    var emsg = $"An error occured while running the workflow. Error: {this}";
-                    Logger.Error(emsg, e);
-                    Logs.Add($"{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture)}  ERROR - {emsg}\r\n{e}");
+                    var msg = $"An error occurred while running the workflow. Error: {this}";
+                    Logger.Error(msg, ex);
+                    Logs.Add($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}  ERROR - {msg}\r\n{ex}");
                 }
+
                 Database.DecrementRunningCount();
                 Database.IncrementFailedCount();
-                entry.Status = Db.Status.Failed;
-                entry.StatusDate = DateTime.Now;
-                entry.Logs = string.Join("\r\n", Logs);
-                Database.UpdateEntry(entry.GetDbId(), entry);
+
+                var entry = Database.GetEntry(Id, InstanceId);
+                if (entry == null)
+                {
+                    entry = new Entry
+                    {
+                        WorkflowId = Id,
+                        JobId = InstanceId.ToString(),
+                        Name = Name,
+                        LaunchType = (Db.LaunchType)(int)LaunchType,
+                        Description = Description,
+                        Status = Db.Status.Running,
+                        StatusDate = DateTime.Now,
+                        Logs = string.Join("\r\n", Logs)
+                    };
+                    Database.InsertEntry(entry);
+                }
+                else
+                {
+                    entry.Status = Db.Status.Failed;
+                    entry.StatusDate = DateTime.Now;
+                    entry.Logs = string.Join("\r\n", Logs);
+                    Database.UpdateEntry(entry.GetDbId(), entry);
+                }
+
                 _historyEntry.Status = Db.Status.Failed;
                 _historyEntry.StatusDate = DateTime.Now;
-                _historyEntry.Logs = string.Join("\r\n", Logs);
+                _historyEntry.Logs = entry.Logs;
                 Database.InsertHistoryEntry(_historyEntry);
+
+                result.Success = false;
             }
             finally
             {
-                // Cleanup
                 if (!_stopCalled)
                 {
                     Logs.Clear();
                 }
-                foreach (var files in FilesPerTask.Values)
-                {
-                    files.Clear();
-                }
 
-                foreach (var entities in EntitiesPerTask.Values)
-                {
-                    entities.Clear();
-                }
+                foreach (var files in FilesPerTask.Values) files.Clear();
+                foreach (var entities in EntitiesPerTask.Values) entities.Clear();
 
                 IsRunning = false;
                 IsRejected = false;
                 GC.Collect();
 
                 JobId = ++ParallelJobId;
-                _ = Jobs.Remove(InstanceId);
+                _ = Jobs.TryRemove(InstanceId, out _);
 
                 if (_jobsQueue.Count > 0)
                 {
@@ -1206,13 +1364,15 @@ namespace Wexflow.Core
                 {
                     if (!_stopCalled)
                     {
-                        Load(Xml); // Reload the original workflow
+                        Load(Xml); // Reload original workflow definition
                     }
                     RestVariables.Clear();
                 }
             }
 
-            return resultSuccess;
+            _semaphore.Release();
+
+            return result.Success;
         }
 
         private void LogWorkflowFinished()
@@ -1282,57 +1442,102 @@ namespace Wexflow.Core
             return tasks.ToArray();
         }
 
-        private Status RunTasks(Node[] nodes, Task[] tasks, bool force)
+        /// <summary>
+        /// Asynchronously runs a list of workflow nodes and returns the final workflow execution status.
+        /// </summary>
+        /// <param name="nodes">The workflow nodes to execute.</param>
+        /// <param name="tasks">The list of available tasks.</param>
+        /// <param name="force">Whether to force execution even if rejected.</param>
+        /// <returns>The overall execution <see cref="Status"/>.</returns>
+        private async System.Threading.Tasks.Task<Status> RunTasksAsync(Node[] nodes, Task[] tasks, bool force)
         {
-            var success = true;
-            var warning = false;
-            var atLeastOneSucceed = false;
+            var result = new RunResult();
 
-            if (nodes.Any())
+            if (nodes.Length > 0)
             {
                 var startNode = GetStartupNode(nodes);
 
-                if (startNode is If @if)
+                if (startNode is If ifNode)
                 {
-                    var doIf = @if;
-                    RunIf(tasks, nodes, doIf, force, ref success, ref warning, ref atLeastOneSucceed);
+                    await RunIfAsync(tasks, nodes, ifNode, force, result);
                 }
-                else if (startNode is While doWhile)
+                else if (startNode is While whileNode)
                 {
-                    RunWhile(tasks, nodes, doWhile, force, ref success, ref warning, ref atLeastOneSucceed);
+                    await RunWhileAsync(tasks, nodes, whileNode, force, result);
                 }
                 else
                 {
                     if (startNode.ParentId == START_ID)
                     {
-                        RunTasks(tasks, nodes, startNode, force, ref success, ref warning, ref atLeastOneSucceed);
+                        await RunTasksAsync(tasks, nodes, startNode, force, result);
                     }
                 }
             }
 
-            return IsRejected ? Status.Rejected : success ? Status.Success : atLeastOneSucceed || warning ? Status.Warning : Status.Error;
+            if (IsRejected)
+            {
+                return Status.Rejected;
+            }
+
+            if (result.Success)
+            {
+                return Status.Success;
+            }
+
+            if (result.AtLeastOneSucceeded || result.Warning)
+            {
+                return Status.Warning;
+            }
+
+            return Status.Error;
         }
 
-        private TaskStatus RunTask(Task task)
+        /// <summary>
+        /// Runs a workflow task asynchronously with retry support.
+        /// </summary>
+        /// <param name="task">The task to execute.</param>
+        /// <returns>
+        /// A <see cref="Task{TaskStatus}"/> representing the asynchronous operation, containing the final <see cref="TaskStatus"/> after retries.
+        /// </returns>
+        /// <remarks>
+        /// This method calls the task's <c>RunAsync()</c> method and, if the task does not succeed,
+        /// retries execution up to <c>RetryCount</c> times with a delay of <c>RetryTimeout</c> milliseconds between attempts.
+        /// Retry attempts are logged using <c>task.InfoFormat</c>.
+        /// </remarks>
+        private async System.Threading.Tasks.Task<TaskStatus> RunTaskAsync(Task task)
         {
-            var status = task.Run();
+            var status = await task.RunAsync();
 
             var retries = 0;
+
+            // Retry logic for faulted or unsuccessful tasks
             while (status.Status != Status.Success && retries < RetryCount)
             {
+                // Wait before retrying
                 Thread.Sleep(RetryTimeout);
+
+                // Log retry attempt
                 task.InfoFormat("Retry attempt {0}", retries + 1);
-                status = task.Run();
+
+                // Re-run task asynchronously
+                status = await task.RunAsync();
                 retries++;
             }
 
             return status;
         }
 
-        private void RunSequentialTasks(IEnumerable<Task> tasks, ref bool success, ref bool warning, ref bool error)
+        /// <summary>
+        /// Executes a list of tasks sequentially and updates the result object with the aggregated status.
+        /// </summary>
+        /// <param name="tasks">The tasks to execute.</param>
+        /// <param name="result">An object that tracks overall success, warnings, and errors.</param>
+        /// <returns>A task representing the asynchronous operation.</returns>
+        private async System.Threading.Tasks.Task RunSequentialTasksAsync(IEnumerable<Task> tasks, RunResult result)
         {
             var atLeastOneSucceed = false;
             var enumerable = tasks as Task[] ?? tasks.ToArray();
+
             foreach (var task in enumerable)
             {
                 if (!task.IsEnabled)
@@ -1350,308 +1555,304 @@ namespace Wexflow.Core
                     Logs.AddRange(task.Logs);
                     continue;
                 }
-                var status = RunTask(task);
+
+                task.Logs.Clear();
+                var status = await RunTaskAsync(task);
                 Logs.AddRange(task.Logs);
-                success &= status.Status == Status.Success;
-                warning |= status.Status == Status.Warning;
-                error &= status.Status == Status.Error;
+
+                result.Success &= status.Status == Status.Success;
+                result.Warning |= status.Status == Status.Warning;
+                result.Error |= status.Status == Status.Error;
+
                 if (!atLeastOneSucceed && status.Status == Status.Success)
                 {
                     atLeastOneSucceed = true;
                 }
             }
 
-            if (enumerable.Any() && !success && atLeastOneSucceed)
+            // Promote to warning if at least one task succeeded but not all
+            if (enumerable.Length > 0 && !result.Success && atLeastOneSucceed)
             {
-                warning = true;
+                result.Warning = true;
             }
         }
 
-        private void RunTasks(Task[] tasks, Node[] nodes, Node node, bool force, ref bool success, ref bool warning, ref bool atLeastOneSucceed)
+        private async System.Threading.Tasks.Task RunTasksAsync(Task[] tasks, Node[] nodes, Node node, bool force, RunResult result)
         {
-            if (node != null)
+            if (node == null) return;
+
+            if (node is If ifNode)
             {
-                if (node is If || node is While || node is Switch)
+                await RunIfAsync(tasks, nodes, ifNode, force, result);
+            }
+            else if (node is While whileNode)
+            {
+                await RunWhileAsync(tasks, nodes, whileNode, force, result);
+            }
+            else if (node is Switch switchNode)
+            {
+                await RunSwitchAsync(tasks, nodes, switchNode, force, result);
+            }
+            else
+            {
+                var task = GetTask(tasks, node.Id) ?? throw new Exception($"Task {node.Id} not found.");
+
+                if (task.IsEnabled && !task.IsStopped && (!IsApproval || (IsApproval && !IsRejected) || force))
                 {
-                    if (node is If if1)
+                    task.Logs.Clear();
+                    var status = await task.RunAsync();
+                    Logs.AddRange(task.Logs);
+
+                    result.Success &= status.Status == Status.Success;
+                    result.Warning |= status.Status == Status.Warning;
+                    if (!result.AtLeastOneSucceeded && status.Status == Status.Success)
                     {
-                        var @if = if1;
-                        RunIf(tasks, nodes, @if, force, ref success, ref warning, ref atLeastOneSucceed);
+                        result.AtLeastOneSucceeded = true;
                     }
-                    else if (node is While @while)
+
+                    var childNode = nodes.FirstOrDefault(n => n.ParentId == node.Id);
+                    if (childNode != null)
                     {
-                        RunWhile(tasks, nodes, @while, force, ref success, ref warning, ref atLeastOneSucceed);
-                    }
-                    else
-                    {
-                        var @switch = (Switch)node;
-                        RunSwitch(tasks, nodes, @switch, force, ref success, ref warning, ref atLeastOneSucceed);
-                    }
-                }
-                else
-                {
-                    var task = GetTask(tasks, node.Id);
-                    if (task != null)
-                    {
-                        if (task.IsEnabled && !task.IsStopped && (!IsApproval || (IsApproval && !IsRejected) || force))
+                        if (childNode is If childIf)
                         {
-                            var status = RunTask(task);
-                            Logs.AddRange(task.Logs);
+                            await RunIfAsync(tasks, nodes, childIf, force, result);
+                        }
+                        else if (childNode is While childWhile)
+                        {
+                            await RunWhileAsync(tasks, nodes, childWhile, force, result);
+                        }
+                        else if (childNode is Switch childSwitch)
+                        {
+                            await RunSwitchAsync(tasks, nodes, childSwitch, force, result);
+                        }
+                        else
+                        {
+                            var childTask = GetTask(tasks, childNode.Id) ?? throw new Exception($"Task {childNode.Id} not found.");
 
-                            success &= status.Status == Status.Success;
-                            warning |= status.Status == Status.Warning;
-                            if (!atLeastOneSucceed && status.Status == Status.Success)
+                            if (childTask.IsEnabled && !childTask.IsStopped && (!IsApproval || (IsApproval && !IsRejected) || force))
                             {
-                                atLeastOneSucceed = true;
-                            }
+                                childTask.Logs.Clear();
+                                var childStatus = await childTask.RunAsync();
+                                Logs.AddRange(childTask.Logs);
 
-                            var childNode = nodes.FirstOrDefault(n => n.ParentId == node.Id);
+                                result.Success &= childStatus.Status == Status.Success;
+                                result.Warning |= childStatus.Status == Status.Warning;
+                                if (!result.AtLeastOneSucceeded && childStatus.Status == Status.Success)
+                                {
+                                    result.AtLeastOneSucceeded = true;
+                                }
 
-                            if (childNode != null)
-                            {
-                                if (childNode is If if1)
+                                var ccNode = nodes.FirstOrDefault(n => n.ParentId == childNode.Id);
+
+                                if (ccNode is If ccIf)
                                 {
-                                    var @if = if1;
-                                    RunIf(tasks, nodes, @if, force, ref success, ref warning, ref atLeastOneSucceed);
+                                    await RunIfAsync(tasks, nodes, ccIf, force, result);
                                 }
-                                else if (childNode is While while2)
+                                else if (ccNode is While ccWhile)
                                 {
-                                    RunWhile(tasks, nodes, while2, force, ref success, ref warning, ref atLeastOneSucceed);
+                                    await RunWhileAsync(tasks, nodes, ccWhile, force, result);
                                 }
-                                else if (childNode is Switch switch2)
+                                else if (ccNode is Switch ccSwitch)
                                 {
-                                    RunSwitch(tasks, nodes, switch2, force, ref success, ref warning, ref atLeastOneSucceed);
+                                    await RunSwitchAsync(tasks, nodes, ccSwitch, force, result);
                                 }
                                 else
                                 {
-                                    var childTask = GetTask(tasks, childNode.Id);
-                                    if (childTask != null)
-                                    {
-                                        if (childTask.IsEnabled && !childTask.IsStopped && (!IsApproval || (IsApproval && !IsRejected) || force))
-                                        {
-                                            var childStatus = RunTask(childTask);
-                                            Logs.AddRange(childTask.Logs);
-
-                                            success &= childStatus.Status == Status.Success;
-                                            warning |= childStatus.Status == Status.Warning;
-                                            if (!atLeastOneSucceed && status.Status == Status.Success)
-                                            {
-                                                atLeastOneSucceed = true;
-                                            }
-
-                                            // Recusive call
-                                            var ccNode = nodes.FirstOrDefault(n => n.ParentId == childNode.Id);
-
-                                            if (ccNode is If node1)
-                                            {
-                                                var @if = node1;
-                                                RunIf(tasks, nodes, @if, force, ref success, ref warning, ref atLeastOneSucceed);
-                                            }
-                                            else if (ccNode is While @while)
-                                            {
-                                                RunWhile(tasks, nodes, @while, force, ref success, ref warning, ref atLeastOneSucceed);
-                                            }
-                                            else if (ccNode is Switch @switch)
-                                            {
-                                                RunSwitch(tasks, nodes, @switch, force, ref success, ref warning, ref atLeastOneSucceed);
-                                            }
-                                            else
-                                            {
-                                                RunTasks(tasks, nodes, ccNode, force, ref success, ref warning, ref atLeastOneSucceed);
-                                            }
-                                        }
-                                    }
-                                    else
-                                    {
-                                        throw new Exception($"Task {childNode.Id} not found.");
-                                    }
+                                    await RunTasksAsync(tasks, nodes, ccNode, force, result);
                                 }
                             }
                         }
                     }
-                    else
-                    {
-                        throw new Exception($"Task {node.Id} not found.");
-                    }
                 }
             }
         }
 
-        private void RunIf(Task[] tasks, Node[] nodes, If @if, bool force, ref bool success, ref bool warning, ref bool atLeastOneSucceed)
+        /// <summary>
+        /// Runs an If node asynchronously, executing either the Do or Else branch based on the condition.
+        /// </summary>
+        /// <param name="tasks">All tasks of the workflow.</param>
+        /// <param name="nodes">All nodes of the workflow.</param>
+        /// <param name="ifNode">The If node to execute.</param>
+        /// <param name="force">Whether to force execution despite approval/rejection rules.</param>
+        /// <param name="result">An object to track success, warnings, and completion state.</param>
+        /// <returns>A Task representing the asynchronous operation.</returns>
+        private async System.Threading.Tasks.Task RunIfAsync(Task[] tasks, Node[] nodes, If ifNode, bool force, RunResult result)
         {
-            var ifTask = GetTask(@if.IfId);
+            var ifTask = GetTask(ifNode.IfId);
 
-            if (ifTask != null)
+            if (ifTask == null)
             {
-                if (ifTask.IsEnabled && !ifTask.IsStopped && (!IsApproval || (IsApproval && !IsRejected)))
-                {
-                    var status = RunTask(ifTask);
-                    Logs.AddRange(ifTask.Logs);
+                throw new Exception($"Task {ifNode.Id} not found.");
+            }
 
-                    success &= status.Status == Status.Success;
-                    warning |= status.Status == Status.Warning;
-                    if (!atLeastOneSucceed && status.Status == Status.Success)
+            if (ifTask.IsEnabled && !ifTask.IsStopped && (!IsApproval || (IsApproval && !IsRejected) || force))
+            {
+                ifTask.Logs.Clear();
+                var status = await ifTask.RunAsync();
+                Logs.AddRange(ifTask.Logs);
+
+                result.Success &= status.Status == Status.Success;
+                result.Warning |= status.Status == Status.Warning;
+                if (!result.AtLeastOneSucceeded && status.Status == Status.Success)
+                {
+                    result.AtLeastOneSucceeded = true;
+                }
+
+                // Run Do branch if condition is true
+                if (status.Status == Status.Success && status.Condition)
+                {
+                    if (ifNode.DoNodes.Length > 0)
                     {
-                        atLeastOneSucceed = true;
+                        var doTasks = NodesToTasks(ifNode.DoNodes);
+                        var doStartNode = GetStartupNode(ifNode.DoNodes);
+
+                        if (doStartNode.ParentId == START_ID)
+                        {
+                            await RunTasksAsync(doTasks, ifNode.DoNodes, doStartNode, force, result);
+                        }
+                    }
+                }
+                // Run Else branch if condition is false
+                else if (!status.Condition && ifNode.ElseNodes != null && ifNode.ElseNodes.Length > 0)
+                {
+                    var elseTasks = NodesToTasks(ifNode.ElseNodes);
+                    var elseStartNode = GetStartupNode(ifNode.ElseNodes);
+
+                    await RunTasksAsync(elseTasks, ifNode.ElseNodes, elseStartNode, force, result);
+                }
+
+                // Run child node of the If block
+                var childNode = nodes.FirstOrDefault(n => n.ParentId == ifNode.Id);
+                if (childNode != null)
+                {
+                    await RunTasksAsync(tasks, nodes, childNode, force, result);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Runs a While node asynchronously. Executes the loop body as long as the condition task succeeds and returns true.
+        /// </summary>
+        /// <param name="tasks">All tasks in the workflow.</param>
+        /// <param name="nodes">All nodes in the workflow.</param>
+        /// <param name="whileNode">The While node to execute.</param>
+        /// <param name="force">Whether to force execution even if rejected.</param>
+        /// <param name="result">An object that accumulates the workflow run results.</param>
+        /// <returns>A task representing the asynchronous execution.</returns>
+        private async System.Threading.Tasks.Task RunWhileAsync(Task[] tasks, Node[] nodes, While whileNode, bool force, RunResult result)
+        {
+            var whileTask = GetTask(whileNode.WhileId);
+
+            if (whileTask == null)
+            {
+                throw new Exception($"Task {whileNode.Id} not found.");
+            }
+
+            if (whileTask.IsEnabled && !whileTask.IsStopped && (!IsApproval || (IsApproval && !IsRejected) || force))
+            {
+                while (true)
+                {
+                    whileTask.Logs.Clear();
+                    var status = await whileTask.RunAsync();
+                    Logs.AddRange(whileTask.Logs);
+
+                    result.Success &= status.Status == Status.Success;
+                    result.Warning |= status.Status == Status.Warning;
+                    if (!result.AtLeastOneSucceeded && status.Status == Status.Success)
+                    {
+                        result.AtLeastOneSucceeded = true;
                     }
 
                     if (status.Status == Status.Success && status.Condition)
                     {
-                        if (@if.DoNodes.Length > 0)
+                        if (whileNode.Nodes.Length > 0)
                         {
-                            // Build Tasks
-                            var doIfTasks = NodesToTasks(@if.DoNodes);
+                            var loopTasks = NodesToTasks(whileNode.Nodes);
+                            var loopStartNode = GetStartupNode(whileNode.Nodes);
 
-                            // Run Tasks
-                            var doIfStartNode = GetStartupNode(@if.DoNodes);
-
-                            if (doIfStartNode.ParentId == START_ID)
-                            {
-                                RunTasks(doIfTasks, @if.DoNodes, doIfStartNode, force, ref success, ref warning, ref atLeastOneSucceed);
-                            }
+                            await RunTasksAsync(loopTasks, whileNode.Nodes, loopStartNode, force, result);
                         }
                     }
-                    else if (status.Condition == false)
+                    else
                     {
-                        if (@if.ElseNodes != null && @if.ElseNodes.Length > 0)
-                        {
-                            // Build Tasks
-                            var elseTasks = NodesToTasks(@if.ElseNodes);
-
-                            // Run Tasks
-                            var elseStartNode = GetStartupNode(@if.ElseNodes);
-
-                            RunTasks(elseTasks, @if.ElseNodes, elseStartNode, force, ref success, ref warning, ref atLeastOneSucceed);
-                        }
-                    }
-
-                    // Child node
-                    var childNode = nodes.FirstOrDefault(n => n.ParentId == @if.Id);
-
-                    if (childNode != null)
-                    {
-                        RunTasks(tasks, nodes, childNode, force, ref success, ref warning, ref atLeastOneSucceed);
+                        break;
                     }
                 }
-            }
-            else
-            {
-                throw new Exception($"Task {@if.Id} not found.");
+
+                // Run the child node after the while block
+                var childNode = nodes.FirstOrDefault(n => n.ParentId == whileNode.Id);
+                if (childNode != null)
+                {
+                    await RunTasksAsync(tasks, nodes, childNode, force, result);
+                }
             }
         }
 
-        private void RunWhile(Task[] tasks, Node[] nodes, While @while, bool force, ref bool success, ref bool warning, ref bool atLeastOneSucceed)
+        /// <summary>
+        /// Runs a Switch node asynchronously. Executes the matching case block or the default block based on the evaluated switch value.
+        /// </summary>
+        /// <param name="tasks">All tasks in the workflow.</param>
+        /// <param name="nodes">All nodes in the workflow.</param>
+        /// <param name="switchNode">The Switch node to execute.</param>
+        /// <param name="force">Whether to force execution even if rejected.</param>
+        /// <param name="result">An object that accumulates the workflow run results.</param>
+        /// <returns>A task representing the asynchronous execution.</returns>
+        private async System.Threading.Tasks.Task RunSwitchAsync(Task[] tasks, Node[] nodes, Switch switchNode, bool force, RunResult result)
         {
-            var whileTask = GetTask(@while.WhileId);
+            var switchTask = GetTask(switchNode.SwitchId);
 
-            if (whileTask != null)
+            if (switchTask == null)
             {
-                if (whileTask.IsEnabled && !whileTask.IsStopped && (!IsApproval || (IsApproval && !IsRejected)))
+                throw new Exception($"Task {switchNode.Id} not found.");
+            }
+
+            if (switchTask.IsEnabled && !switchTask.IsStopped && (!IsApproval || (IsApproval && !IsRejected) || force))
+            {
+                switchTask.Logs.Clear();
+                var status = await switchTask.RunAsync();
+                Logs.AddRange(switchTask.Logs);
+
+                result.Success &= status.Status == Status.Success;
+                result.Warning |= status.Status == Status.Warning;
+                if (!result.AtLeastOneSucceeded && status.Status == Status.Success)
                 {
-                    while (true)
+                    result.AtLeastOneSucceeded = true;
+                }
+
+                if (status.Status == Status.Success)
+                {
+                    var executedCase = false;
+
+                    foreach (var @case in switchNode.Cases)
                     {
-                        var status = RunTask(whileTask);
-                        Logs.AddRange(whileTask.Logs);
-
-                        success &= status.Status == Status.Success;
-                        warning |= status.Status == Status.Warning;
-                        if (!atLeastOneSucceed && status.Status == Status.Success)
+                        if (@case.Value == status.SwitchValue)
                         {
-                            atLeastOneSucceed = true;
-                        }
-
-                        if (status.Status == Status.Success && status.Condition)
-                        {
-                            if (@while.Nodes.Length > 0)
+                            if (@case.Nodes.Length > 0)
                             {
-                                // Build Tasks
-                                var doWhileTasks = NodesToTasks(@while.Nodes);
+                                var caseTasks = NodesToTasks(@case.Nodes);
+                                var caseStartNode = GetStartupNode(@case.Nodes);
 
-                                // Run Tasks
-                                var doWhileStartNode = GetStartupNode(@while.Nodes);
-
-                                RunTasks(doWhileTasks, @while.Nodes, doWhileStartNode, force, ref success, ref warning, ref atLeastOneSucceed);
+                                await RunTasksAsync(caseTasks, @case.Nodes, caseStartNode, force, result);
                             }
-                        }
-                        else if (status.Condition == false)
-                        {
+
+                            executedCase = true;
                             break;
                         }
                     }
 
-                    // Child node
-                    var childNode = nodes.FirstOrDefault(n => n.ParentId == @while.Id);
+                    if (!executedCase && switchNode.Default != null && switchNode.Default.Length > 0)
+                    {
+                        var defaultTasks = NodesToTasks(switchNode.Default);
+                        var defaultStartNode = GetStartupNode(switchNode.Default);
 
+                        await RunTasksAsync(defaultTasks, switchNode.Default, defaultStartNode, force, result);
+                    }
+
+                    // Run child node after switch block
+                    var childNode = nodes.FirstOrDefault(n => n.ParentId == switchNode.Id);
                     if (childNode != null)
                     {
-                        RunTasks(tasks, nodes, childNode, force, ref success, ref warning, ref atLeastOneSucceed);
-                    }
-                }
-            }
-            else
-            {
-                throw new Exception($"Task {@while.Id} not found.");
-            }
-        }
-
-        private void RunSwitch(Task[] tasks, Node[] nodes, Switch @switch, bool force, ref bool success, ref bool warning, ref bool atLeastOneSucceed)
-        {
-            var switchTask = GetTask(@switch.SwitchId);
-
-            if (switchTask != null)
-            {
-                if (switchTask.IsEnabled && !switchTask.IsStopped && (!IsApproval || (IsApproval && !IsRejected)))
-                {
-                    var status = RunTask(switchTask);
-                    Logs.AddRange(switchTask.Logs);
-
-                    success &= status.Status == Status.Success;
-                    warning |= status.Status == Status.Warning;
-                    if (!atLeastOneSucceed && status.Status == Status.Success)
-                    {
-                        atLeastOneSucceed = true;
-                    }
-
-                    if (status.Status == Status.Success)
-                    {
-                        var aCaseHasBeenExecuted = false;
-                        foreach (var @case in @switch.Cases)
-                        {
-                            if (@case.Value == status.SwitchValue)
-                            {
-                                if (@case.Nodes.Length > 0)
-                                {
-                                    // Build Tasks
-                                    var switchTasks = NodesToTasks(@case.Nodes);
-
-                                    // Run Tasks
-                                    var switchStartNode = GetStartupNode(@case.Nodes);
-
-                                    RunTasks(switchTasks, @case.Nodes, switchStartNode, force, ref success, ref warning, ref atLeastOneSucceed);
-                                }
-                                aCaseHasBeenExecuted = true;
-                                break;
-                            }
-                        }
-
-                        if (!aCaseHasBeenExecuted && @switch.Default != null && @switch.Default.Any())
-                        {
-                            // Build Tasks
-                            var defalutTasks = NodesToTasks(@switch.Default);
-
-                            // Run Tasks
-                            var defaultStartNode = GetStartupNode(@switch.Default);
-
-                            RunTasks(defalutTasks, @switch.Default, defaultStartNode, force, ref success, ref warning, ref atLeastOneSucceed);
-                        }
-
-                        // Child node
-                        var childNode = nodes.FirstOrDefault(n => n.ParentId == @switch.Id);
-
-                        if (childNode != null)
-                        {
-                            RunTasks(tasks, nodes, childNode, force, ref success, ref warning, ref atLeastOneSucceed);
-                        }
+                        await RunTasksAsync(tasks, nodes, childNode, force, result);
                     }
                 }
             }
@@ -1670,22 +1871,32 @@ namespace Wexflow.Core
                     var jobId = JobId;
                     StoppedBy = stoppedBy;
                     _stopCalled = true;
+
+                    // Stop all running tasks
+                    foreach (var task in Tasks)
+                    {
+                        task.Stop();
+
+                        //if (ExecutionGraph == null)
+                        //{
+                        //    Logs.AddRange(task.Logs);
+                        //}
+                    }
+
+                    // Interrupt and wait for the workflow thread to finish
                     if (_thread != null)
                     {
                         _thread.Abort();
                         _thread.Join();
                     }
-                    foreach (var task in Tasks)
-                    {
-                        task.Stop();
-                        Logs.AddRange(task.Logs);
-                    }
+
                     var logs = string.Join("\r\n", Logs);
                     IsWaitingForApproval = false;
                     Database.DecrementRunningCount();
                     Database.IncrementStoppedCount();
                     var entry = Database.GetEntry(Id, InstanceId);
                     entry.Status = Db.Status.Stopped;
+                    JobStatus = Db.Status.Stopped;
                     entry.StatusDate = DateTime.Now;
                     entry.Logs = logs;
                     Database.UpdateEntry(entry.GetDbId(), entry);
@@ -1695,12 +1906,17 @@ namespace Wexflow.Core
                     Database.InsertHistoryEntry(_historyEntry);
                     IsRejected = false;
                     Logs.Clear();
-                    _ = Jobs.Remove(InstanceId);
+                    _ = Jobs.TryRemove(InstanceId, out _);
 
-                    if (_jobsQueue.Count > 0)
+                    //if (_jobsQueue.Count > 0)
+                    //{
+                    //    var job = _jobsQueue.Dequeue();
+                    //    _ = job.Workflow.StartAsync(StartedBy);
+                    //}
+
+                    foreach (var job in _jobsQueue)
                     {
-                        var job = _jobsQueue.Dequeue();
-                        _ = job.Workflow.StartAsync(StartedBy);
+                        _ = job.Workflow.Stop(stoppedBy);
                     }
 
                     Load(Xml); // Reload the original workflow
@@ -1737,9 +1953,9 @@ namespace Wexflow.Core
             {
                 try
                 {
-#pragma warning disable CS0618 // Le type ou le membre est obsolète
+#pragma warning disable CS0618
                     _thread.Suspend();
-#pragma warning restore CS0618 // Le type ou le membre est obsolète
+#pragma warning restore CS0618
                     IsPaused = true;
                     Database.IncrementPendingCount();
                     Database.DecrementRunningCount();

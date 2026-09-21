@@ -8,7 +8,7 @@ namespace Wexflow.Core.Db.MongoDB
 {
     public sealed class Db : Core.Db.Db
     {
-        private static readonly object Padlock = new();
+        private static readonly object _padlock = new object();
         private static IMongoDatabase _db;
 
         public Db(string connectionString) : base(connectionString)
@@ -50,7 +50,7 @@ namespace Wexflow.Core.Db.MongoDB
                 settings.SslSettings = new SslSettings { EnabledSslProtocols = sslProtocols };
             }
 
-            MongoClient client = new(settings);
+            var client = new MongoClient(settings);
             _db = client.GetDatabase(database);
         }
 
@@ -61,7 +61,7 @@ namespace Wexflow.Core.Db.MongoDB
 
             var statusCountCol = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
 
-            StatusCount statusCount = new()
+            var statusCount = new StatusCount
             {
                 PendingCount = 0,
                 RunningCount = 0,
@@ -77,17 +77,31 @@ namespace Wexflow.Core.Db.MongoDB
             // Entries
             ClearEntries();
 
-            // Insert default user if necessary
+            // Insert admin user if it does not exist
+            // Backward compatibility: update admin password from MD5/SHA256 hash to PBKDF2 of "wexflow2018"
             var usersCol = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
-            if (usersCol.CountDocuments(FilterDefinition<User>.Empty) == 0)
+            var user = usersCol.Find(u => u.Username == "admin").FirstOrDefault();
+            if (user == null)
             {
                 InsertDefaultUser();
             }
+            else
+            {
+                if (IsMd5(user.Password) || IsSha256(user.Password))
+                {
+                    var passwordHash = HashPassword("wexflow2018");
+                    var update = Builders<User>.Update
+                    .Set(u => u.Password, passwordHash);
+
+                    _ = usersCol.UpdateOne(u => u.Id == user.Id, update);
+                }
+            }
+
         }
 
         public override IEnumerable<Core.Db.Workflow> GetWorkflows()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Workflow>(Core.Db.Workflow.DOCUMENT_NAME);
                 return col.Find(FilterDefinition<Workflow>.Empty).ToEnumerable();
@@ -96,10 +110,10 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override string InsertWorkflow(Core.Db.Workflow workflow)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Workflow>(Core.Db.Workflow.DOCUMENT_NAME);
-                Workflow wf = new() { Xml = workflow.Xml };
+                var wf = new Workflow { Xml = workflow.Xml };
                 col.InsertOne(wf);
                 return wf.Id;
             }
@@ -107,7 +121,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override Core.Db.Workflow GetWorkflow(string id)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Workflow>(Core.Db.Workflow.DOCUMENT_NAME);
                 return col.Find(w => w.Id == id).FirstOrDefault();
@@ -116,7 +130,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void UpdateWorkflow(string dbId, Core.Db.Workflow workflow)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Workflow>(Core.Db.Workflow.DOCUMENT_NAME);
                 var update = Builders<Workflow>.Update
@@ -128,7 +142,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void DeleteWorkflow(string id)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Workflow>(Core.Db.Workflow.DOCUMENT_NAME);
                 _ = col.DeleteOne(e => e.Id == id);
@@ -137,7 +151,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void DeleteUserWorkflowRelationsByWorkflowId(string workflowDbId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<UserWorkflow>(Core.Db.UserWorkflow.DOCUMENT_NAME);
                 _ = col.DeleteMany(uw => uw.WorkflowId == workflowDbId);
@@ -146,7 +160,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void DeleteWorkflows(string[] ids)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Workflow>(Core.Db.Workflow.DOCUMENT_NAME);
                 _ = col.DeleteMany(e => ids.Contains(e.Id));
@@ -155,10 +169,10 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void InsertUserWorkflowRelation(Core.Db.UserWorkflow userWorkflow)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<UserWorkflow>(Core.Db.UserWorkflow.DOCUMENT_NAME);
-                UserWorkflow uw = new()
+                var uw = new UserWorkflow
                 {
                     UserId = userWorkflow.UserId,
                     WorkflowId = userWorkflow.WorkflowId
@@ -169,7 +183,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void DeleteUserWorkflowRelationsByUserId(string userId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<UserWorkflow>(Core.Db.UserWorkflow.DOCUMENT_NAME);
                 _ = col.DeleteMany(uw => uw.UserId == userId);
@@ -178,7 +192,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<string> GetUserWorkflows(string userId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<UserWorkflow>(Core.Db.UserWorkflow.DOCUMENT_NAME);
                 return col.Find(uw => uw.UserId == userId).ToEnumerable().Select(uw => uw.WorkflowId);
@@ -187,7 +201,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override bool CheckUserWorkflow(string userId, string workflowId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<UserWorkflow>(Core.Db.UserWorkflow.DOCUMENT_NAME);
                 var res = col.Find(uw => uw.UserId == userId && uw.WorkflowId == workflowId).FirstOrDefault();
@@ -197,31 +211,28 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.User> GetAdministrators(string keyword, UserOrderBy uo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var keywordToLower = keyword.ToLower();
 
-                return uo switch
+                switch (uo)
                 {
-                    UserOrderBy.UsernameAscending => col
-                        .Find(u => u.Username.ToLower().Contains(keywordToLower) &&
-                                   u.UserProfile == UserProfile.Administrator)
-                        .Sort(Builders<User>.Sort.Ascending(u => u.Username))
-                        .ToEnumerable(),
-                    UserOrderBy.UsernameDescending => col
-                        .Find(u => u.Username.ToLower().Contains(keywordToLower) &&
-                                   u.UserProfile == UserProfile.Administrator)
-                        .Sort(Builders<User>.Sort.Descending(u => u.Username))
-                        .ToEnumerable(),
-                    _ => Array.Empty<User>()
-                };
+                    case UserOrderBy.UsernameAscending:
+                        return col.Find(u => u.Username.ToLower().Contains(keywordToLower) && u.UserProfile == UserProfile.Administrator).Sort(Builders<User>.Sort.Ascending(u => u.Username)).ToEnumerable();
+                    case UserOrderBy.UsernameDescending:
+                        return col.Find(u => u.Username.ToLower().Contains(keywordToLower) && u.UserProfile == UserProfile.Administrator).Sort(Builders<User>.Sort.Descending(u => u.Username)).ToEnumerable();
+                    default:
+                        break;
+                }
+
+                return Array.Empty<User>();
             }
         }
 
         public override void ClearStatusCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 _ = col.DeleteMany(FilterDefinition<StatusCount>.Empty);
@@ -230,7 +241,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void ClearEntries()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
                 _ = col.DeleteMany(FilterDefinition<Entry>.Empty);
@@ -239,7 +250,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override Core.Db.StatusCount GetStatusCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.Find(FilterDefinition<StatusCount>.Empty).FirstOrDefault();
@@ -249,7 +260,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.Entry> GetEntries()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
                 return col.Find(FilterDefinition<Entry>.Empty).ToEnumerable();
@@ -258,11 +269,11 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void InsertUser(Core.Db.User user)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 user.CreatedOn = DateTime.Now;
-                User nu = new()
+                var nu = new User
                 {
                     CreatedOn = user.CreatedOn,
                     Email = user.Email,
@@ -279,7 +290,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void UpdateUser(string id, Core.Db.User user)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var update = Builders<User>.Update
@@ -295,7 +306,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void UpdateUsernameAndEmailAndUserProfile(string userId, string username, string email, UserProfile up)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
 
@@ -311,7 +322,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override Core.Db.User GetUser(string username)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var user = col.Find(u => u.Username == username).FirstOrDefault();
@@ -321,7 +332,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override Core.Db.User GetUserById(string userId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var user = col.Find(u => u.Id == userId).FirstOrDefault();
@@ -331,7 +342,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void DeleteUser(string username, string password)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var user = col.Find(u => u.Username == username).FirstOrDefault();
@@ -349,7 +360,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override string GetPassword(string username)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var user = col.Find(u => u.Username == username).First();
@@ -359,7 +370,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.User> GetUsers()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 return col.Find(FilterDefinition<User>.Empty).ToEnumerable();
@@ -368,27 +379,28 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.User> GetUsers(string keyword, UserOrderBy uo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var keywordToLower = keyword.ToLower();
 
-                return uo switch
+                switch (uo)
                 {
-                    UserOrderBy.UsernameAscending => col.Find(u => u.Username.ToLower().Contains(keywordToLower))
-                        .Sort(Builders<User>.Sort.Ascending(u => u.Username))
-                        .ToEnumerable(),
-                    UserOrderBy.UsernameDescending => col.Find(u => u.Username.ToLower().Contains(keywordToLower))
-                        .Sort(Builders<User>.Sort.Descending(u => u.Username))
-                        .ToEnumerable(),
-                    _ => Array.Empty<User>()
-                };
+                    case UserOrderBy.UsernameAscending:
+                        return col.Find(u => u.Username.ToLower().Contains(keywordToLower)).Sort(Builders<User>.Sort.Ascending(u => u.Username)).ToEnumerable();
+                    case UserOrderBy.UsernameDescending:
+                        return col.Find(u => u.Username.ToLower().Contains(keywordToLower)).Sort(Builders<User>.Sort.Descending(u => u.Username)).ToEnumerable();
+                    default:
+                        break;
+                }
+
+                return Array.Empty<User>();
             }
         }
 
         public override void UpdatePassword(string username, string password)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 var dbUser = col.Find(u => u.Username == username).First();
@@ -403,7 +415,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.HistoryEntry> GetHistoryEntries()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
                 return col.Find(FilterDefinition<HistoryEntry>.Empty).ToEnumerable();
@@ -412,7 +424,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.HistoryEntry> GetHistoryEntries(string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var keywordToUpper = keyword.ToUpper();
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
@@ -422,7 +434,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.HistoryEntry> GetHistoryEntries(string keyword, int page, int entriesCount)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var keywordToUpper = keyword.ToUpper();
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
@@ -432,229 +444,139 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.HistoryEntry> GetHistoryEntries(string keyword, DateTime from, DateTime to, int page, int entriesCount, EntryOrderBy heo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
                 var keywordToLower = keyword.ToLower();
                 var skip = (page - 1) * entriesCount;
 
-                return heo switch
+                switch (heo)
                 {
-                    EntryOrderBy.StatusDateAscending => col
-                        .Find(he => (he.Name.ToLower().Contains(keywordToLower) ||
-                                     he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from &&
-                                    he.StatusDate < to)
-                        .Sort(Builders<HistoryEntry>.Sort.Ascending(he => he.StatusDate))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.StatusDateDescending => col
-                        .Find(he => (he.Name.ToLower().Contains(keywordToLower) ||
-                                     he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from &&
-                                    he.StatusDate < to)
-                        .Sort(Builders<HistoryEntry>.Sort.Descending(he => he.StatusDate))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.WorkflowIdAscending => col
-                        .Find(he => (he.Name.ToLower().Contains(keywordToLower) ||
-                                     he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from &&
-                                    he.StatusDate < to)
-                        .Sort(Builders<HistoryEntry>.Sort.Ascending(he => he.WorkflowId))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.WorkflowIdDescending => col
-                        .Find(he => (he.Name.ToLower().Contains(keywordToLower) ||
-                                     he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from &&
-                                    he.StatusDate < to)
-                        .Sort(Builders<HistoryEntry>.Sort.Descending(he => he.WorkflowId))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.NameAscending => col
-                        .Find(he => (he.Name.ToLower().Contains(keywordToLower) ||
-                                     he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from &&
-                                    he.StatusDate < to)
-                        .Sort(Builders<HistoryEntry>.Sort.Ascending(he => he.Name))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.NameDescending => col
-                        .Find(he => (he.Name.ToLower().Contains(keywordToLower) ||
-                                     he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from &&
-                                    he.StatusDate < to)
-                        .Sort(Builders<HistoryEntry>.Sort.Descending(he => he.Name))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.LaunchTypeAscending => col
-                        .Find(he => (he.Name.ToLower().Contains(keywordToLower) ||
-                                     he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from &&
-                                    he.StatusDate < to)
-                        .Sort(Builders<HistoryEntry>.Sort.Ascending(he => he.LaunchType))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.LaunchTypeDescending => col
-                        .Find(he => (he.Name.ToLower().Contains(keywordToLower) ||
-                                     he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from &&
-                                    he.StatusDate < to)
-                        .Sort(Builders<HistoryEntry>.Sort.Descending(he => he.LaunchType))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.DescriptionAscending => col
-                        .Find(he => (he.Name.ToLower().Contains(keywordToLower) ||
-                                     he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from &&
-                                    he.StatusDate < to)
-                        .Sort(Builders<HistoryEntry>.Sort.Ascending(he => he.Description))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.DescriptionDescending => col
-                        .Find(he => (he.Name.ToLower().Contains(keywordToLower) ||
-                                     he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from &&
-                                    he.StatusDate < to)
-                        .Sort(Builders<HistoryEntry>.Sort.Descending(he => he.Description))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.StatusAscending => col
-                        .Find(he => (he.Name.ToLower().Contains(keywordToLower) ||
-                                     he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from &&
-                                    he.StatusDate < to)
-                        .Sort(Builders<HistoryEntry>.Sort.Ascending(he => he.Status))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.StatusDescending => col
-                        .Find(he => (he.Name.ToLower().Contains(keywordToLower) ||
-                                     he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from &&
-                                    he.StatusDate < to)
-                        .Sort(Builders<HistoryEntry>.Sort.Descending(he => he.Status))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    _ => Array.Empty<HistoryEntry>()
-                };
+                    case EntryOrderBy.StatusDateAscending:
+
+                        return col.Find(he => (he.Name.ToLower().Contains(keywordToLower) || he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from && he.StatusDate < to).Sort(Builders<HistoryEntry>.Sort.Ascending(he => he.StatusDate)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.StatusDateDescending:
+
+                        return col.Find(he => (he.Name.ToLower().Contains(keywordToLower) || he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from && he.StatusDate < to).Sort(Builders<HistoryEntry>.Sort.Descending(he => he.StatusDate)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.WorkflowIdAscending:
+
+                        return col.Find(he => (he.Name.ToLower().Contains(keywordToLower) || he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from && he.StatusDate < to).Sort(Builders<HistoryEntry>.Sort.Ascending(he => he.WorkflowId)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.WorkflowIdDescending:
+
+                        return col.Find(he => (he.Name.ToLower().Contains(keywordToLower) || he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from && he.StatusDate < to).Sort(Builders<HistoryEntry>.Sort.Descending(he => he.WorkflowId)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.NameAscending:
+
+                        return col.Find(he => (he.Name.ToLower().Contains(keywordToLower) || he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from && he.StatusDate < to).Sort(Builders<HistoryEntry>.Sort.Ascending(he => he.Name)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.NameDescending:
+
+                        return col.Find(he => (he.Name.ToLower().Contains(keywordToLower) || he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from && he.StatusDate < to).Sort(Builders<HistoryEntry>.Sort.Descending(he => he.Name)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.LaunchTypeAscending:
+
+                        return col.Find(he => (he.Name.ToLower().Contains(keywordToLower) || he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from && he.StatusDate < to).Sort(Builders<HistoryEntry>.Sort.Ascending(he => he.LaunchType)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.LaunchTypeDescending:
+
+                        return col.Find(he => (he.Name.ToLower().Contains(keywordToLower) || he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from && he.StatusDate < to).Sort(Builders<HistoryEntry>.Sort.Descending(he => he.LaunchType)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.DescriptionAscending:
+
+                        return col.Find(he => (he.Name.ToLower().Contains(keywordToLower) || he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from && he.StatusDate < to).Sort(Builders<HistoryEntry>.Sort.Ascending(he => he.Description)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.DescriptionDescending:
+
+                        return col.Find(he => (he.Name.ToLower().Contains(keywordToLower) || he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from && he.StatusDate < to).Sort(Builders<HistoryEntry>.Sort.Descending(he => he.Description)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.StatusAscending:
+
+                        return col.Find(he => (he.Name.ToLower().Contains(keywordToLower) || he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from && he.StatusDate < to).Sort(Builders<HistoryEntry>.Sort.Ascending(he => he.Status)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.StatusDescending:
+
+                        return col.Find(he => (he.Name.ToLower().Contains(keywordToLower) || he.Description.ToLower().Contains(keywordToLower)) && he.StatusDate > from && he.StatusDate < to).Sort(Builders<HistoryEntry>.Sort.Descending(he => he.Status)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    default:
+                        break;
+                }
+
+                return Array.Empty<HistoryEntry>();
             }
         }
 
         public override IEnumerable<Core.Db.Entry> GetEntries(string keyword, DateTime from, DateTime to, int page, int entriesCount, EntryOrderBy eo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
                 var keywordToLower = keyword.ToLower();
                 var skip = (page - 1) * entriesCount;
 
-                return eo switch
+                switch (eo)
                 {
-                    EntryOrderBy.StatusDateAscending => col
-                        .Find(e => (e.Name.ToLower().Contains(keywordToLower) ||
-                                    e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from &&
-                                   e.StatusDate < to)
-                        .Sort(Builders<Entry>.Sort.Ascending(e => e.StatusDate))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.StatusDateDescending => col
-                        .Find(e => (e.Name.ToLower().Contains(keywordToLower) ||
-                                    e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from &&
-                                   e.StatusDate < to)
-                        .Sort(Builders<Entry>.Sort.Descending(e => e.StatusDate))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.WorkflowIdAscending => col
-                        .Find(e => (e.Name.ToLower().Contains(keywordToLower) ||
-                                    e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from &&
-                                   e.StatusDate < to)
-                        .Sort(Builders<Entry>.Sort.Ascending(e => e.WorkflowId))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.WorkflowIdDescending => col
-                        .Find(e => (e.Name.ToLower().Contains(keywordToLower) ||
-                                    e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from &&
-                                   e.StatusDate < to)
-                        .Sort(Builders<Entry>.Sort.Descending(e => e.WorkflowId))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.NameAscending => col
-                        .Find(e => (e.Name.ToLower().Contains(keywordToLower) ||
-                                    e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from &&
-                                   e.StatusDate < to)
-                        .Sort(Builders<Entry>.Sort.Ascending(e => e.Name))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.NameDescending => col
-                        .Find(e => (e.Name.ToLower().Contains(keywordToLower) ||
-                                    e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from &&
-                                   e.StatusDate < to)
-                        .Sort(Builders<Entry>.Sort.Descending(e => e.Name))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.LaunchTypeAscending => col
-                        .Find(e => (e.Name.ToLower().Contains(keywordToLower) ||
-                                    e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from &&
-                                   e.StatusDate < to)
-                        .Sort(Builders<Entry>.Sort.Ascending(e => e.LaunchType))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.LaunchTypeDescending => col
-                        .Find(e => (e.Name.ToLower().Contains(keywordToLower) ||
-                                    e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from &&
-                                   e.StatusDate < to)
-                        .Sort(Builders<Entry>.Sort.Descending(e => e.LaunchType))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.DescriptionAscending => col
-                        .Find(e => (e.Name.ToLower().Contains(keywordToLower) ||
-                                    e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from &&
-                                   e.StatusDate < to)
-                        .Sort(Builders<Entry>.Sort.Ascending(e => e.Description))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.DescriptionDescending => col
-                        .Find(e => (e.Name.ToLower().Contains(keywordToLower) ||
-                                    e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from &&
-                                   e.StatusDate < to)
-                        .Sort(Builders<Entry>.Sort.Descending(e => e.Description))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.StatusAscending => col
-                        .Find(e => (e.Name.ToLower().Contains(keywordToLower) ||
-                                    e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from &&
-                                   e.StatusDate < to)
-                        .Sort(Builders<Entry>.Sort.Ascending(e => e.Status))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    EntryOrderBy.StatusDescending => col
-                        .Find(e => (e.Name.ToLower().Contains(keywordToLower) ||
-                                    e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from &&
-                                   e.StatusDate < to)
-                        .Sort(Builders<Entry>.Sort.Descending(e => e.Status))
-                        .ToEnumerable()
-                        .Skip(skip)
-                        .Take(entriesCount),
-                    _ => Array.Empty<Entry>()
-                };
+                    case EntryOrderBy.StatusDateAscending:
+
+                        return col.Find(e => (e.Name.ToLower().Contains(keywordToLower) || e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from && e.StatusDate < to).Sort(Builders<Entry>.Sort.Ascending(e => e.StatusDate)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.StatusDateDescending:
+
+                        return col.Find(e => (e.Name.ToLower().Contains(keywordToLower) || e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from && e.StatusDate < to).Sort(Builders<Entry>.Sort.Descending(e => e.StatusDate)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.WorkflowIdAscending:
+
+                        return col.Find(e => (e.Name.ToLower().Contains(keywordToLower) || e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from && e.StatusDate < to).Sort(Builders<Entry>.Sort.Ascending(e => e.WorkflowId)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.WorkflowIdDescending:
+
+                        return col.Find(e => (e.Name.ToLower().Contains(keywordToLower) || e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from && e.StatusDate < to).Sort(Builders<Entry>.Sort.Descending(e => e.WorkflowId)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.NameAscending:
+
+                        return col.Find(e => (e.Name.ToLower().Contains(keywordToLower) || e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from && e.StatusDate < to).Sort(Builders<Entry>.Sort.Ascending(e => e.Name)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.NameDescending:
+
+                        return col.Find(e => (e.Name.ToLower().Contains(keywordToLower) || e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from && e.StatusDate < to).Sort(Builders<Entry>.Sort.Descending(e => e.Name)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.LaunchTypeAscending:
+
+                        return col.Find(e => (e.Name.ToLower().Contains(keywordToLower) || e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from && e.StatusDate < to).Sort(Builders<Entry>.Sort.Ascending(e => e.LaunchType)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.LaunchTypeDescending:
+
+                        return col.Find(e => (e.Name.ToLower().Contains(keywordToLower) || e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from && e.StatusDate < to).Sort(Builders<Entry>.Sort.Descending(e => e.LaunchType)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.DescriptionAscending:
+
+                        return col.Find(e => (e.Name.ToLower().Contains(keywordToLower) || e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from && e.StatusDate < to).Sort(Builders<Entry>.Sort.Ascending(e => e.Description)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.DescriptionDescending:
+
+                        return col.Find(e => (e.Name.ToLower().Contains(keywordToLower) || e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from && e.StatusDate < to).Sort(Builders<Entry>.Sort.Descending(e => e.Description)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.StatusAscending:
+
+                        return col.Find(e => (e.Name.ToLower().Contains(keywordToLower) || e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from && e.StatusDate < to).Sort(Builders<Entry>.Sort.Ascending(e => e.Status)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    case EntryOrderBy.StatusDescending:
+
+                        return col.Find(e => (e.Name.ToLower().Contains(keywordToLower) || e.Description.ToLower().Contains(keywordToLower)) && e.StatusDate > from && e.StatusDate < to).Sort(Builders<Entry>.Sort.Descending(e => e.Status)).ToEnumerable().Skip(skip).Take(entriesCount);
+
+                    default:
+                        break;
+                }
+
+                return Array.Empty<Entry>();
             }
         }
 
         public override long GetHistoryEntriesCount(string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var keywordToUpper = keyword.ToUpper();
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
@@ -664,7 +586,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override long GetHistoryEntriesCount(string keyword, DateTime from, DateTime to)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var keywordToLower = keyword.ToLower();
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
@@ -675,7 +597,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override long GetEntriesCount(string keyword, DateTime from, DateTime to)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var keywordToLower = keyword.ToLower();
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
@@ -686,7 +608,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override DateTime GetHistoryEntryStatusDateMin()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
                 var q = col.Find(FilterDefinition<HistoryEntry>.Empty).Sort(Builders<HistoryEntry>.Sort.Ascending(e => e.StatusDate)).ToEnumerable().ToArray();
@@ -696,7 +618,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override DateTime GetHistoryEntryStatusDateMax()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
                 var q = col.Find(FilterDefinition<HistoryEntry>.Empty).Sort(Builders<HistoryEntry>.Sort.Descending(e => e.StatusDate)).ToEnumerable().ToArray();
@@ -706,7 +628,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override DateTime GetEntryStatusDateMin()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
                 var q = col.Find(FilterDefinition<Entry>.Empty).Sort(Builders<Entry>.Sort.Ascending(e => e.StatusDate)).ToEnumerable().ToArray();
@@ -716,7 +638,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override DateTime GetEntryStatusDateMax()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
                 var q = col.Find(FilterDefinition<Entry>.Empty).Sort(Builders<Entry>.Sort.Descending(e => e.StatusDate)).ToEnumerable().ToArray();
@@ -726,7 +648,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void IncrementDisabledCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.Find(FilterDefinition<StatusCount>.Empty).FirstOrDefault();
@@ -744,7 +666,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void IncrementRunningCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.Find(FilterDefinition<StatusCount>.Empty).FirstOrDefault();
@@ -762,7 +684,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override Core.Db.Entry GetEntry(int workflowId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
                 return col.Find(e => e.WorkflowId == workflowId).FirstOrDefault();
@@ -771,7 +693,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override Core.Db.Entry GetEntry(int workflowId, Guid jobId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
                 return col.Find(e => e.WorkflowId == workflowId && e.JobId == jobId.ToString()).FirstOrDefault();
@@ -780,10 +702,10 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void InsertEntry(Core.Db.Entry entry)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
-                Entry ie = new()
+                var ie = new Entry
                 {
                     Description = entry.Description,
                     LaunchType = entry.LaunchType,
@@ -807,7 +729,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void UpdateEntry(string id, Core.Db.Entry entry)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
                 var update = Builders<Entry>.Update
@@ -826,7 +748,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void IncrementRejectedCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.Find(FilterDefinition<StatusCount>.Empty).FirstOrDefault();
@@ -844,7 +766,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void IncrementDoneCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.Find(FilterDefinition<StatusCount>.Empty).FirstOrDefault();
@@ -862,7 +784,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void IncrementWarningCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.Find(FilterDefinition<StatusCount>.Empty).FirstOrDefault();
@@ -880,7 +802,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void IncrementFailedCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.Find(FilterDefinition<StatusCount>.Empty).FirstOrDefault();
@@ -898,10 +820,10 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void InsertHistoryEntry(Core.Db.HistoryEntry entry)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
-                HistoryEntry he = new()
+                var he = new HistoryEntry
                 {
                     Description = entry.Description,
                     LaunchType = entry.LaunchType,
@@ -923,7 +845,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void DecrementRunningCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.Find(FilterDefinition<StatusCount>.Empty).FirstOrDefault();
@@ -941,7 +863,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void IncrementStoppedCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.Find(FilterDefinition<StatusCount>.Empty).FirstOrDefault();
@@ -959,7 +881,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void IncrementPendingCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.Find(FilterDefinition<StatusCount>.Empty).FirstOrDefault();
@@ -977,7 +899,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void DecrementPendingCount()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<StatusCount>(Core.Db.StatusCount.DOCUMENT_NAME);
                 var statusCount = col.Find(FilterDefinition<StatusCount>.Empty).FirstOrDefault();
@@ -995,7 +917,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override string GetEntryLogs(string entryId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Entry>(Core.Db.Entry.DOCUMENT_NAME);
                 var entry = col.Find(e => e.Id == entryId).First();
@@ -1005,7 +927,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override string GetHistoryEntryLogs(string entryId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<HistoryEntry>(Core.Db.HistoryEntry.DOCUMENT_NAME);
                 var entry = col.Find(e => e.Id == entryId).First();
@@ -1015,7 +937,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.User> GetNonRestricedUsers()
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<User>(Core.Db.User.DOCUMENT_NAME);
                 return col.Find(u => u.UserProfile == UserProfile.SuperAdministrator || u.UserProfile == UserProfile.Administrator).Sort(Builders<User>.Sort.Ascending(u => u.Username)).ToList();
@@ -1024,10 +946,10 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override string InsertRecord(Core.Db.Record record)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
-                Record r = new()
+                var r = new Record
                 {
                     Approved = record.Approved,
                     AssignedOn = record.AssignedOn,
@@ -1050,7 +972,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void UpdateRecord(string recordId, Core.Db.Record record)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
                 var update = Builders<Record>.Update
@@ -1074,7 +996,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void DeleteRecords(string[] recordIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
                 _ = col.DeleteMany(r => recordIds.Contains(r.Id));
@@ -1083,7 +1005,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override Core.Db.Record GetRecord(string id)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
                 var record = col.Find(r => r.Id == id).FirstOrDefault();
@@ -1093,7 +1015,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.Record> GetRecords(string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
                 var keywordToUpper = keyword.ToUpper();
@@ -1104,7 +1026,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.Record> GetRecordsCreatedBy(string createdBy)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
                 var records = col.Find(r => r.CreatedBy == createdBy).Sort(Builders<Record>.Sort.Ascending(r => r.Name)).ToList();
@@ -1114,7 +1036,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.Record> GetRecordsCreatedByOrAssignedTo(string createdBy, string assingedTo, string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Record>(Core.Db.Record.DOCUMENT_NAME);
                 var keywordToUpper = keyword.ToUpper();
@@ -1125,10 +1047,10 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override string InsertVersion(Core.Db.Version version)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Version>(Core.Db.Version.DOCUMENT_NAME);
-                Version v = new()
+                var v = new Version
                 {
                     RecordId = version.RecordId,
                     CreatedOn = DateTime.Now,
@@ -1141,7 +1063,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void UpdateVersion(string versionId, Core.Db.Version version)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Version>(Core.Db.Version.DOCUMENT_NAME);
                 var update = Builders<Version>.Update
@@ -1155,7 +1077,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void DeleteVersions(string[] versionIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Version>(Core.Db.Version.DOCUMENT_NAME);
                 _ = col.DeleteMany(v => versionIds.Contains(v.Id));
@@ -1164,7 +1086,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.Version> GetVersions(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Version>(Core.Db.Version.DOCUMENT_NAME);
                 var versions = col.Find(v => v.RecordId == recordId).Sort(Builders<Version>.Sort.Ascending(v => v.CreatedOn)).ToList();
@@ -1174,7 +1096,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override Core.Db.Version GetLatestVersion(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Version>(Core.Db.Version.DOCUMENT_NAME);
                 var version = col.Find(v => v.RecordId == recordId).Sort(Builders<Version>.Sort.Descending(v => v.CreatedOn)).FirstOrDefault();
@@ -1184,10 +1106,10 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override string InsertNotification(Core.Db.Notification notification)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Notification>(Core.Db.Notification.DOCUMENT_NAME);
-                Notification n = new()
+                var n = new Notification
                 {
                     AssignedBy = notification.AssignedBy,
                     AssignedOn = notification.AssignedOn,
@@ -1202,7 +1124,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void MarkNotificationsAsRead(string[] notificationIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Notification>(Core.Db.Notification.DOCUMENT_NAME);
                 var notifications = col.Find(n => notificationIds.Contains(n.Id)).ToList();
@@ -1218,7 +1140,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void MarkNotificationsAsUnread(string[] notificationIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Notification>(Core.Db.Notification.DOCUMENT_NAME);
                 var notifications = col.Find(n => notificationIds.Contains(n.Id)).ToList();
@@ -1234,7 +1156,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void DeleteNotifications(string[] notificationIds)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Notification>(Core.Db.Notification.DOCUMENT_NAME);
                 _ = col.DeleteMany(n => notificationIds.Contains(n.Id));
@@ -1243,7 +1165,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.Notification> GetNotifications(string assignedTo, string keyword)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Notification>(Core.Db.Notification.DOCUMENT_NAME);
                 var keywordToUpper = keyword.ToUpper();
@@ -1254,7 +1176,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override bool HasNotifications(string assignedTo)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Notification>(Core.Db.Notification.DOCUMENT_NAME);
                 var notifications = col.Find(n => n.AssignedTo == assignedTo && !n.IsRead);
@@ -1265,10 +1187,10 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override string InsertApprover(Core.Db.Approver approver)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Approver>(Core.Db.Approver.DOCUMENT_NAME);
-                Approver a = new()
+                var a = new Approver
                 {
                     UserId = approver.UserId,
                     RecordId = approver.RecordId,
@@ -1282,7 +1204,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void UpdateApprover(string approverId, Core.Db.Approver approver)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Approver>(Core.Db.Approver.DOCUMENT_NAME);
                 var update = Builders<Approver>.Update
@@ -1297,7 +1219,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void DeleteApproversByRecordId(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Approver>(Core.Db.Approver.DOCUMENT_NAME);
                 _ = col.DeleteMany(a => a.RecordId == recordId);
@@ -1306,7 +1228,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void DeleteApprovedApprovers(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Approver>(Core.Db.Approver.DOCUMENT_NAME);
                 _ = col.DeleteMany(a => a.Approved && a.RecordId == recordId);
@@ -1315,7 +1237,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override void DeleteApproversByUserId(string userId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Approver>(Core.Db.Approver.DOCUMENT_NAME);
                 _ = col.DeleteMany(a => a.UserId == userId);
@@ -1324,7 +1246,7 @@ namespace Wexflow.Core.Db.MongoDB
 
         public override IEnumerable<Core.Db.Approver> GetApprovers(string recordId)
         {
-            lock (Padlock)
+            lock (_padlock)
             {
                 var col = _db.GetCollection<Approver>(Core.Db.Approver.DOCUMENT_NAME);
                 return col.Find(a => a.RecordId == recordId).ToList();

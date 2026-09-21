@@ -1,46 +1,81 @@
 window.Login = function () {
 
-    var uri = window.Common.trimEnd(window.Settings.Uri, "/");
-    var loginBtn = document.getElementById("btn-login");
-    var usernameTxt = document.getElementById("txt-username");
-    var passwordTxt = document.getElementById("txt-password");
-    var auth = "";
+    const uri = window.Common.trimEnd(window.Settings.Uri, "/");
 
-    loginBtn.onclick = function () {
-        login();
+    let suser = window.getUser();
+
+    document.body.style.display = 'none';
+    const load = () => document.body.style.display = 'block';
+
+    if (suser) {
+        let user = JSON.parse(suser);
+
+        const _logout = () => {
+            window.logout(() => {
+                load();
+            });
+        };
+
+        window.Common.post(uri + "/validate-token?u=" + encodeURIComponent(user.Username),
+            function (res) {
+                if (res.valid === true) {
+                    window.location.replace("doc.html");
+                } else {
+                    _logout();
+                }
+            }, function () {
+                _logout();
+            }, null);
+    } else {
+        load();
+    }
+
+    const loginBtn = document.getElementById("btn-login");
+    const usernameTxt = document.getElementById("txt-username");
+    const passwordTxt = document.getElementById("txt-password");
+
+    loginBtn.onclick = async function () {
+        await login();
     };
 
-    passwordTxt.onkeyup = function (event) {
+    passwordTxt.onkeyup = async function (event) {
         event.preventDefault();
 
-        if (event.keyCode === 13) {
-            login();
+        if (event.key === 'Enter') {
+            await login();
         }
     };
 
-    function login() {
+    async function login() {
 
-        var username = usernameTxt.value;
-        var password = passwordTxt.value;
-        var passwordHash = window.MD5(password);
-        auth = "Basic " + btoa(username + ":" + passwordHash);
+        let username = usernameTxt.value;
+        let password = passwordTxt.value;
+        let stayConnected = true;
 
         if (username === "" || password === "") {
-            alert("Enter a valid username and password.");
+            window.Common.toastInfo(language.get("valid-username"));
         } else {
-            window.Common.get(uri + "/user?username=" + encodeURIComponent(username), function (user) {
-                if (typeof user === "undefined" || user === null) {
-                    alert("Wrong credentials.");
-                } else {
-                    if (passwordHash === user.Password) {
-                        window.authorize(username, passwordHash, user.UserProfile);
-                        window.location.replace("doc.html");
-                    } else {
-                        alert("The password is incorrect.");
-                    }
-
+            try {
+                const res = await fetch(uri + "/login",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({ username, password, stayConnected }),
+                    })
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status} - ${res.statusText}`)
                 }
-            }, function () { }, auth);
+                const data = await res.json()
+                if (data.access_token) {
+                    window.authorize(username);
+                    window.location.replace("doc.html");
+                }
+            } catch (err) {
+                console.error("Login failed:", err);
+                alert("Wrong Credentials");
+            }
         }
     }
 
